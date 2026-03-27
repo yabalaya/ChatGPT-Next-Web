@@ -27,7 +27,7 @@ import LoadingIcon from "../icons/three-dots.svg";
 import ReloadButtonIcon from "../icons/reload.svg";
 import React from "react";
 // import { useDebouncedCallback } from "use-debounce";
-import { showImageModal, showToast, FullScreen } from "./ui-lib";
+import { showImageModal, showSvgModal, showToast, FullScreen } from "./ui-lib";
 import {
   HTMLPreview,
   HTMLPreviewHander,
@@ -430,9 +430,8 @@ export function Mermaid(props: { code: string }) {
 
   function viewSvgInNewWindow() {
     if (!svg) return;
-    const blob = new Blob([svg], { type: "image/svg+xml" });
     const fileName = `mermaid-${Date.now()}.svg`;
-    showImageModal(URL.createObjectURL(blob), fileName);
+    showSvgModal(svg, fileName);
   }
 
   function copyErrorToClipboard() {
@@ -658,8 +657,7 @@ export function PreCode(props: { children: any; status?: boolean }) {
     e.stopPropagation();
 
     if (contentType === "svg") {
-      const blob = new Blob([previewContent], { type: "image/svg+xml" });
-      showImageModal(URL.createObjectURL(blob));
+      showSvgModal(previewContent, `preview-${Date.now()}.svg`);
     }
     // else if (contentType === "html") {
     //   const win = window.open("", "_blank");

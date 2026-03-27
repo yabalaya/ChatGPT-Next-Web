@@ -20,6 +20,7 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useMemo,
   useRef,
 } from "react";
 import { IconButton } from "./button";
@@ -593,16 +594,28 @@ export function showPrompt(content: any, value = "", rows = 3) {
 
 function ImageModalContent({
   img,
+  svgContent,
   fileName: propFileName,
 }: {
-  img: string;
+  img?: string;
+  svgContent?: string;
   fileName?: string;
 }) {
   const [rotation, setRotation] = useState(0); // 旋转角度
   const [scale, setScale] = useState(1); // 缩放比例
   const [isAdaptive, setIsAdaptive] = useState(true);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [svgIntrinsicSize, setSvgIntrinsicSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const minScale = 0.01;
+  const maxScale = 10;
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const svgWrapRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef({ x: 0, y: 0 });
 
   const handleRotateLeft = () => {
     setRotation((prev) => prev - 90); // 向左旋转 90 度
@@ -613,16 +626,17 @@ function ImageModalContent({
   };
 
   const handleZoomIn = () => {
-    setScale((prev) => Math.min(prev + 0.1, 3)); // 放大，最大 3 倍
+    setScale((prev) => Math.min(prev + 0.1, maxScale)); // 放大，最大 1000%
   };
 
   const handleZoomOut = () => {
-    setScale((prev) => Math.max(prev - 0.1, 0.1)); // 缩小，最小 0.1 倍
+    setScale((prev) => Math.max(prev - 0.1, minScale)); // 缩小，最小 1%
   };
 
   const handleResetToOriginal = () => {
     setScale(1);
     setRotation(0);
+    setOffset({ x: 0, y: 0 });
     setIsAdaptive(false);
   };
 
@@ -633,27 +647,161 @@ function ImageModalContent({
     }
   };
 
+  const normalizedSvg = useMemo(() => {
+    if (!svgContent) return "";
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(svgContent, "image/svg+xml");
+      const svg = doc.documentElement;
+      if (!svg || svg.nodeName.toLowerCase() !== "svg") return svgContent;
+
+      const widthAttr = svg.getAttribute("width") || "";
+      const heightAttr = svg.getAttribute("height") || "";
+      const viewBox = svg.getAttribute("viewBox");
+
+      const isPercent = (val: string) => val.includes("%");
+      const hasSize =
+        widthAttr &&
+        !isPercent(widthAttr) &&
+        heightAttr &&
+        !isPercent(heightAttr);
+
+      if (!hasSize && viewBox) {
+        const parts = viewBox.split(/[\s,]+/).map((p) => parseFloat(p));
+        if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+          svg.setAttribute("width", `${parts[2]}`);
+          svg.setAttribute("height", `${parts[3]}`);
+        }
+      }
+
+      return new XMLSerializer().serializeToString(svg);
+    } catch {
+      return svgContent;
+    }
+  }, [svgContent]);
+
+  const getSvgSize = useCallback(() => {
+    if (!normalizedSvg) return null;
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(normalizedSvg, "image/svg+xml");
+      const svg = doc.documentElement;
+      const widthAttr = svg.getAttribute("width") || "";
+      const heightAttr = svg.getAttribute("height") || "";
+      const viewBox = svg.getAttribute("viewBox");
+
+      const parseSize = (val: string) => {
+        if (val.includes("%")) return NaN;
+        const num = parseFloat(val.replace(/[^\d.]+/g, ""));
+        return Number.isFinite(num) ? num : NaN;
+      };
+
+      const width = parseSize(widthAttr);
+      const height = parseSize(heightAttr);
+
+      if (Number.isFinite(width) && Number.isFinite(height) && width > 0) {
+        return { width, height };
+      }
+
+      if (viewBox) {
+        const parts = viewBox.split(/[\s,]+/).map((p) => parseFloat(p));
+        if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+          return { width: parts[2], height: parts[3] };
+        }
+      }
+    } catch {
+      // ignore parsing errors
+    }
+    return null;
+  }, [normalizedSvg]);
+  const svgSize = useMemo(() => getSvgSize(), [getSvgSize]);
+
+  useEffect(() => {
+    if (!normalizedSvg) return;
+    // 新内容时默认回到自适应模式
+    setIsAdaptive(true);
+    setScale(1);
+    setRotation(0);
+    setOffset({ x: 0, y: 0 });
+
+    const measure = () => {
+      const svgEl = svgWrapRef.current?.querySelector("svg");
+      if (!svgEl) return;
+
+      let width = 0;
+      let height = 0;
+
+      const rect = svgEl.getBoundingClientRect();
+      if (rect.width > 1 && rect.height > 1) {
+        width = rect.width;
+        height = rect.height;
+      }
+
+      if (!width || !height) {
+        try {
+          const target = svgEl.querySelector("g") || svgEl;
+          const bbox = (target as SVGGraphicsElement).getBBox();
+          if (bbox.width > 0 && bbox.height > 0) {
+            width = bbox.width;
+            height = bbox.height;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (width > 0 && height > 0) {
+        setSvgIntrinsicSize({ width, height });
+      }
+    };
+
+    requestAnimationFrame(() => requestAnimationFrame(measure));
+  }, [normalizedSvg]);
+
   const fitImageToContainer = useCallback(() => {
-    if (!containerRef.current || !imageRef.current) return;
+    if (!containerRef.current) return;
 
     const container = containerRef.current;
     const image = imageRef.current;
 
-    // Get natural dimensions of image
-    const imgWidth = image.naturalWidth;
-    const imgHeight = image.naturalHeight;
+    let imgWidth = image?.naturalWidth || 0;
+    let imgHeight = image?.naturalHeight || 0;
+    if (normalizedSvg) {
+      const preferred = svgIntrinsicSize || svgSize;
+      if (preferred) {
+        imgWidth = preferred.width;
+        imgHeight = preferred.height;
+      }
+    }
+    if (!imgWidth || !imgHeight) return;
 
     // Get available space (accounting for padding)
-    const availWidth = container.clientWidth - 40; // 20px padding on each side
-    const availHeight = container.clientHeight - 40;
+    const fitPadding = 80; // total padding (left+right / top+bottom)
+    const availWidth = container.clientWidth - fitPadding;
+    const availHeight = container.clientHeight - fitPadding;
 
     // Calculate required scale to fit
     const scaleX = availWidth / imgWidth;
     const scaleY = availHeight / imgHeight;
-    const newScale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 1:1
+    // Fit 模式：包含策略，允许放大
+    const newScale = Math.min(scaleX, scaleY);
 
-    setScale(newScale);
-  }, []);
+    setScale(Math.min(Math.max(newScale, minScale), maxScale));
+    setOffset({ x: 0, y: 0 });
+  }, [
+    getSvgSize,
+    maxScale,
+    minScale,
+    normalizedSvg,
+    svgIntrinsicSize,
+    svgSize,
+  ]);
+
+  useEffect(() => {
+    if (isAdaptive && normalizedSvg && svgIntrinsicSize) {
+      fitImageToContainer();
+    }
+  }, [fitImageToContainer, isAdaptive, normalizedSvg, svgIntrinsicSize]);
 
   const handleDownload = async () => {
     try {
@@ -667,9 +815,11 @@ function ImageModalContent({
       let fileName: string;
       if (propFileName) {
         fileName = propFileName;
+      } else if (normalizedSvg) {
+        fileName = `image_${timestamp}.svg`;
       } else {
         // 否则，使用旧的逻辑作为备用方案
-        const fileExt = getFileExtension(img) || "jpg";
+        const fileExt = getFileExtension(img || "") || "jpg";
         fileName = `image_${timestamp}.${fileExt}`;
       }
       // const fileExt = getFileExtension(img) || "jpg"; // img 是你图片 URL 的变量
@@ -677,7 +827,12 @@ function ImageModalContent({
 
       // 创建一个临时的下载链接
       const link = document.createElement("a");
-      link.href = img; // 直接使用原始图片 URL
+      if (normalizedSvg) {
+        const blob = new Blob([normalizedSvg], { type: "image/svg+xml" });
+        link.href = URL.createObjectURL(blob);
+      } else {
+        link.href = img || ""; // 直接使用原始图片 URL
+      }
       link.download = fileName; // 浏览器会尝试使用这个文件名
 
       // 对于某些浏览器和服务器配置，可能需要设置 target="_blank" 来确保下载行为
@@ -687,6 +842,10 @@ function ImageModalContent({
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+
+      if (normalizedSvg) {
+        URL.revokeObjectURL(link.href);
+      }
     } catch (error) {
       console.error("Download failed:", error);
       alert(
@@ -697,10 +856,14 @@ function ImageModalContent({
 
   // getFileExtension 函数保持不变
   const getFileExtension = (url: string): string | null => {
-    // 移除查询参数和哈希，以正确匹配扩展名
-    const pathname = new URL(url).pathname;
-    const match = pathname.match(/\.([a-zA-Z0-9]+)$/);
-    return match ? match[1].toLowerCase() : null;
+    try {
+      // 移除查询参数和哈希，以正确匹配扩展名
+      const pathname = new URL(url).pathname;
+      const match = pathname.match(/\.([a-zA-Z0-9]+)$/);
+      return match ? match[1].toLowerCase() : null;
+    } catch {
+      return null;
+    }
   };
 
   useEffect(() => {
@@ -730,9 +893,9 @@ function ImageModalContent({
 
       // 处理缩放逻辑
       if (e.deltaY > 0) {
-        setScale((prev) => Math.max(prev - 0.1, 0.1));
+        setScale((prev) => Math.max(prev - 0.1, minScale));
       } else {
-        setScale((prev) => Math.min(prev + 0.1, 3));
+        setScale((prev) => Math.min(prev + 0.1, maxScale));
       }
     };
 
@@ -743,6 +906,44 @@ function ImageModalContent({
     };
   }, []);
   const scalePercentage = Math.round(scale * 100);
+
+  useEffect(() => {
+    const handleMouseMove = (e: globalThis.MouseEvent) => {
+      if (!isDragging) return;
+      setOffset({
+        x: e.clientX - dragStartRef.current.x,
+        y: e.clientY - dragStartRef.current.y,
+      });
+    };
+
+    const handleMouseUp = () => {
+      if (!isDragging) return;
+      setIsDragging(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    setIsDragging(true);
+    dragStartRef.current = {
+      x: e.clientX - offset.x,
+      y: e.clientY - offset.y,
+    };
+  };
+
+  const contentStyle: React.CSSProperties = {
+    transform: `translate(${offset.x}px, ${offset.y}px) rotate(${rotation}deg) scale(${scale})`,
+    transformOrigin: "center",
+    transition: isDragging ? "none" : "transform 0.2s ease",
+  };
 
   return (
     <div
@@ -765,25 +966,40 @@ function ImageModalContent({
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
+          cursor: isDragging ? "grabbing" : "grab",
+          userSelect: "none",
         }}
+        onMouseDown={handleMouseDown}
         // onWheel={handleWheel}
       >
-        <img
-          ref={imageRef}
-          src={img}
-          alt="preview"
-          style={{
-            maxWidth: "100%",
-            transform: `rotate(${rotation}deg) scale(${scale})`,
-            transformOrigin: "center",
-            transition: "transform 0.3s ease",
-          }}
-          onLoad={() => {
-            if (isAdaptive) {
-              fitImageToContainer();
-            }
-          }}
-        />
+        {normalizedSvg ? (
+          <div
+            ref={svgWrapRef}
+            style={{
+              display: "inline-block",
+              width: svgSize?.width ? `${svgSize.width}px` : "auto",
+              height: svgSize?.height ? `${svgSize.height}px` : "auto",
+              ...contentStyle,
+            }}
+            dangerouslySetInnerHTML={{ __html: normalizedSvg }}
+          />
+        ) : (
+          <img
+            ref={imageRef}
+            src={img}
+            alt="preview"
+            draggable={false}
+            style={{
+              maxWidth: "100%",
+              ...contentStyle,
+            }}
+            onLoad={() => {
+              if (isAdaptive) {
+                fitImageToContainer();
+              }
+            }}
+          />
+        )}
       </div>
 
       {/* 底部横栏 */}
@@ -869,6 +1085,14 @@ export function showImageModal(img: string, fileName?: string) {
     title: Locale.Export.Image.Modal,
     defaultMax: true,
     children: <ImageModalContent img={img} fileName={fileName} />,
+  });
+}
+
+export function showSvgModal(svgContent: string, fileName?: string) {
+  showModal({
+    title: Locale.Export.Image.Modal,
+    defaultMax: true,
+    children: <ImageModalContent svgContent={svgContent} fileName={fileName} />,
   });
 }
 export function SearchSelector<T>(props: {
