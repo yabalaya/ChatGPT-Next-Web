@@ -132,6 +132,7 @@ export interface ChatSession {
   };
   secondaryMemoryPrompt?: string; // 副模型记忆提示
   secondaryLastSummarizeIndex?: number; // 副模型摘要索引
+  secondaryClearContextIndex?: number; // 副模型独立的历史清除索引
 }
 
 export const DEFAULT_TOPIC = Locale.Store.DefaultTopic;
@@ -162,6 +163,7 @@ function createEmptySession(): ChatSession {
     secondaryModelConfig: undefined,
     secondaryMemoryPrompt: "",
     secondaryLastSummarizeIndex: 0,
+    secondaryClearContextIndex: undefined,
   };
 }
 
@@ -1001,6 +1003,7 @@ export const useChatStore = createPersistStore(
         get().updateCurrentSession((session) => {
           session.messages = [];
           session.memoryPrompt = "";
+          session.secondaryClearContextIndex = undefined;
         });
       },
 

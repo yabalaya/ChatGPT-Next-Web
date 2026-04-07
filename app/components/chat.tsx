@@ -402,21 +402,22 @@ function ClearContextDivider(props: { index: number; isSecondary?: boolean }) {
       className={styles["clear-context"]}
       onClick={() =>
         chatStore.updateTargetSession(session, (session) => {
-          session.clearContextIndex = undefined;
-
-          // 清除主模型的 beClear 标记
-          if (props.index > 0 && session.messages[props.index - 1]) {
-            session.messages[props.index - 1].beClear = false;
-          }
-
-          // 双模型模式：同时清除副模型的 beClear 标记
-          // 使用最后一条带有 beClear 标记的消息，而不是依赖索引
-          if (session.dualModelMode && session.secondaryMessages?.length) {
-            for (let i = session.secondaryMessages.length - 1; i >= 0; i--) {
-              if (session.secondaryMessages[i]?.beClear) {
-                session.secondaryMessages[i].beClear = false;
-                break;
+          if (props.isSecondary) {
+            // 副模型：清除副模型的 beClear 和 index
+            session.secondaryClearContextIndex = undefined;
+            if (session.secondaryMessages) {
+              for (let i = session.secondaryMessages.length - 1; i >= 0; i--) {
+                if (session.secondaryMessages[i]?.beClear) {
+                  session.secondaryMessages[i].beClear = false;
+                  break;
+                }
               }
+            }
+          } else {
+            // 主模型
+            session.clearContextIndex = undefined;
+            if (props.index > 0 && session.messages[props.index - 1]) {
+              session.messages[props.index - 1].beClear = false;
             }
           }
         })
@@ -1389,7 +1390,7 @@ export function ChatActions(props: {
           icon={<BreakIcon />}
           onClick={() => {
             chatStore.updateTargetSession(session, (session) => {
-              // 找到主模型最后一条消息
+              // 主模型
               const lastMessage = session.messages[session.messages.length - 1];
               if (lastMessage) {
                 if (lastMessage?.beClear) {
@@ -1398,24 +1399,25 @@ export function ChatActions(props: {
                 } else {
                   session.clearContextIndex = session.messages.length;
                   lastMessage.beClear = true;
-                  session.memoryPrompt = ""; // 清除记忆提示
+                  session.memoryPrompt = "";
                 }
               }
 
-              // 双模型模式：同时清除副模型的上下文
+              // 副模型——独立处理
               if (session.dualModelMode && session.secondaryMessages?.length) {
-                const lastSecondaryMessage =
+                const lastSecondary =
                   session.secondaryMessages[
                     session.secondaryMessages.length - 1
                   ];
-                if (lastSecondaryMessage) {
-                  if (lastMessage?.beClear) {
-                    // 如果主模型是清除状态，副模型也清除
-                    lastSecondaryMessage.beClear = true;
-                    session.secondaryMemoryPrompt = "";
+                if (lastSecondary) {
+                  if (lastSecondary.beClear) {
+                    session.secondaryClearContextIndex = undefined;
+                    lastSecondary.beClear = false;
                   } else {
-                    // 如果主模型取消清除，副模型也取消
-                    lastSecondaryMessage.beClear = false;
+                    session.secondaryClearContextIndex =
+                      session.secondaryMessages.length;
+                    lastSecondary.beClear = true;
+                    session.secondaryMemoryPrompt = "";
                   }
                 }
               }
@@ -4201,6 +4203,10 @@ function ChatComponent() {
     (session.clearContextIndex ?? -1) >= 0
       ? session.clearContextIndex! + context.length // - msgRenderIndex
       : -1;
+  const secondaryClearContextIndex =
+    (session.secondaryClearContextIndex ?? -1) >= 0
+      ? session.secondaryClearContextIndex! + context.length
+      : -1;
 
   const [showPromptModal, setShowPromptModal] = useState(false);
 
@@ -4756,13 +4762,13 @@ function ChatComponent() {
               const latency = (totalReplyLatency! / 1000).toFixed(2);
               const speed = (
                 (1000 * completionTokens!) /
-                (totalReplyLatency! - firstReplyLatency!)
+                Math.max(totalReplyLatency! - firstReplyLatency!, 10)
               ).toFixed(2);
               return `⚡ ${speed} T/s ⏱️ FT:${ttft}s | TT:${latency}s`;
             } else {
               const speed = (
                 (1000 * completionTokens!) /
-                totalReplyLatency!
+                Math.max(totalReplyLatency!, 10)
               ).toFixed(2);
               const latency = (totalReplyLatency! / 1000).toFixed(2);
               return `⚡ ${speed} T/s ⏱️ ${latency}s (Non-stream)`;
@@ -4836,13 +4842,13 @@ function ChatComponent() {
               const latency = (totalReplyLatency! / 1000).toFixed(2);
               const speed = (
                 (1000 * completionTokens!) /
-                (totalReplyLatency! - firstReplyLatency!)
+                Math.max(totalReplyLatency! - firstReplyLatency!, 0.001)
               ).toFixed(2);
               return `⚡ ${speed} T/s ⏱️ FT:${ttft}s | TT:${latency}s`;
             } else {
               const speed = (
                 (1000 * completionTokens!) /
-                totalReplyLatency!
+                Math.max(totalReplyLatency!, 0.001)
               ).toFixed(2);
               const latency = (totalReplyLatency! / 1000).toFixed(2);
               return `⚡ ${speed} T/s ⏱️ ${latency}s (Non-stream)`;
@@ -5025,8 +5031,11 @@ function ChatComponent() {
               const showTyping = message.preview || message.streaming;
 
               // 上下文分割线判断
+              const effectiveClearIndex = isSecondary
+                ? secondaryClearContextIndex
+                : clearContextIndex;
               const shouldShowClearContextDivider =
-                i === clearContextIndex - 1 || message?.beClear === true;
+                i === effectiveClearIndex - 1 || message?.beClear === true;
 
               return (
                 <Fragment key={message.id}>
@@ -5394,7 +5403,7 @@ function ChatComponent() {
                   </div>
                   {/* 上下文分割线 */}
                   {shouldShowClearContextDivider && (
-                    <ClearContextDivider index={i} />
+                    <ClearContextDivider index={i} isSecondary={isSecondary} />
                   )}
                 </Fragment>
               );
@@ -5777,7 +5786,7 @@ function ChatComponent() {
                     </div>
                   </div>
                   {shouldShowClearContextDivider && (
-                    <ClearContextDivider index={i} />
+                    <ClearContextDivider index={i} isSecondary={false} />
                   )}
                 </Fragment>
               );
