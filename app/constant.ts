@@ -220,17 +220,18 @@ export const VISION_MODEL_REGEXES = [
   /gpt-5/,
   /^o(1(-pro)?|3(-pro)?|4-mini)/i,
   /^dall-e-3$/, // Matches exactly "dall-e-3"
-  /claude.*[34]/,
-  /gemini-/,
+  /claude.*[34]/i,
+  /gemini-/i,
+  /gemma-?[34]/i,
   /learnlm/,
-  /glm-4(?:\.\d+)?v/,
+  /glm-(?:\.\d+)?v/,
   /pixtral/,
   /kimi-latest/,
-  /kimi-k2.5/i,
+  /kimi-k2\.5/i,
   /multimodal/i,
   /llama-4/i,
   /grok-4/i,
-  /qwen3.5/i,
+  /qwen3\./i,
 ];
 
 export const EXCLUDE_VISION_MODEL_REGEXES = [/claude-3-5-haiku-20241022/];
