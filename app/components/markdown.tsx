@@ -980,6 +980,9 @@ export function PreCode(props: { children: any; status?: boolean }) {
                   setShowPythonPanel(true);
                   if (hasInputCall) {
                     setShowStdinInput(true);
+                  } else {
+                    // 非输入类型，直接触发运行
+                    executePython();
                   }
                 }
               }}
