@@ -596,10 +596,12 @@ function ImageModalContent({
   img,
   svgContent,
   fileName: propFileName,
+  mermaidCode,
 }: {
   img?: string;
   svgContent?: string;
   fileName?: string;
+  mermaidCode?: string;
 }) {
   const [rotation, setRotation] = useState(0); // 旋转角度
   const [scale, setScale] = useState(1); // 缩放比例
@@ -1012,6 +1014,7 @@ function ImageModalContent({
           justifyContent: "center",
           gap: "10px",
           boxShadow: "0 -2px 4px rgba(0,0,0,0.1)", // 可选：添加阴影
+          position: "relative", // 为右下角链接按钮提供定位参考
         }}
       >
         <div className={styles["image-buttons-container"]}>
@@ -1075,6 +1078,41 @@ function ImageModalContent({
             💾
           </button>
         </div>
+        {/* Mermaid 导航链接 - 右下角 */}
+        {mermaidCode && (
+          <div
+            style={{
+              position: "absolute",
+              right: "10px",
+              bottom: "10px",
+              display: "flex",
+              gap: "8px",
+            }}
+          >
+            <a
+              href="https://mermaid.js.org/intro/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles["image-button"]}
+              title="Mermaid Official Documentation"
+              style={{ textDecoration: "none" }}
+            >
+              📖 Docs
+            </a>
+            <a
+              href={`https://mermaid-exporter.pages.dev/?code=${encodeURIComponent(
+                mermaidCode,
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles["image-button"]}
+              title="Open in Mermaid Exporter"
+              style={{ textDecoration: "none" }}
+            >
+              🎨 Editor
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1088,11 +1126,21 @@ export function showImageModal(img: string, fileName?: string) {
   });
 }
 
-export function showSvgModal(svgContent: string, fileName?: string) {
+export function showSvgModal(
+  svgContent: string,
+  fileName?: string,
+  mermaidCode?: string,
+) {
   showModal({
     title: Locale.Export.Image.Modal,
     defaultMax: true,
-    children: <ImageModalContent svgContent={svgContent} fileName={fileName} />,
+    children: (
+      <ImageModalContent
+        svgContent={svgContent}
+        fileName={fileName}
+        mermaidCode={mermaidCode}
+      />
+    ),
   });
 }
 export function SearchSelector<T>(props: {

@@ -431,7 +431,7 @@ export function Mermaid(props: { code: string }) {
   function viewSvgInNewWindow() {
     if (!svg) return;
     const fileName = `mermaid-${Date.now()}.svg`;
-    showSvgModal(svg, fileName);
+    showSvgModal(svg, fileName, props.code);
   }
 
   function copyErrorToClipboard() {
