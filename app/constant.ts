@@ -212,23 +212,30 @@ export const DEFAULT_TTS_VOICES = [
 ];
 
 export const VISION_MODEL_REGEXES = [
+  // vision keyword
   /vision/i,
+  /multimodal/i,
   /-vl/i,
-  /gpt-4o/,
-  /gpt-4\.1/,
-  /gpt-4-turbo(?!.*preview)/, // Matches "gpt-4-turbo" but not "gpt-4-turbo-preview"
-  /gpt-5/,
-  /^o(1(-pro)?|3(-pro)?|4-mini)/i,
-  /^dall-e-3$/, // Matches exactly "dall-e-3"
-  /claude.*[34]/i,
+
+  // gpt models
+  /gpt-4o/i,
+  /gpt-4\.1/i,
+  /gpt-5/i,
+  /gpt-4-turbo(?!.*preview)/i, // Matches "gpt-4-turbo" but not "gpt-4-turbo-preview"
+  /^o(?:1(?:-pro)?|3(?:-pro)?|4-mini)/i,
+
+  /claude.*(?:3|4)/i,
   /gemini-/i,
   /gemma-?[34]/i,
   /learnlm/,
+
   /glm-(?:\.\d+)?v/,
+
   /pixtral/,
+
   /kimi-latest/,
-  /kimi-k2\.5/i,
-  /multimodal/i,
+  /kimi-k2\./i,
+
   /llama-4/i,
   /grok-4/i,
   /qwen3\./i,
@@ -236,59 +243,31 @@ export const VISION_MODEL_REGEXES = [
 
 export const EXCLUDE_VISION_MODEL_REGEXES = [/claude-3-5-haiku-20241022/];
 
-const openaiModels = [
-  "chatgpt-4o-latest",
-  "gpt-4o",
-  "gpt-4o-2024-05-13",
-  "gpt-4o-2024-08-06",
-  "gpt-4o-2024-11-20",
-  "gpt-4o-mini",
-  "gpt-4",
-  "gpt-4-32k",
-  "gpt-4-turbo",
-  "gpt-4-turbo-preview",
-  "gpt-4-vision-preview",
-  "gpt-4.5-preview",
-  "gpt-5",
-  "gpt-5-chat",
-  "gpt-5-mini",
-  "gpt-5-nano",
-  "o1",
-  "o1-pro",
-  "o3",
-  "o3-pro",
-  "o4-mini",
-];
+const openaiModels = ["chatgpt-4o-latest", "gpt-5", "gpt-5.2", "gpt-5.4"];
 
 const googleModels = [
-  "gemini-1.5-flash",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-2.0-flash-exp",
-  "gemini-2.0-flash-thinking-exp",
+  "gemini-flash-latest",
+  "gemini-pro-latest",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
-  "gemini-1.5-pro",
-  "gemini-1.5-pro-exp",
-  "gemini-1.5-pro-latest",
-  "gemini-2.0-pro",
-  "gemini-2.0-pro-exp",
+  "gemini-3-flash-preview",
   "gemini-2.5-pro",
-  "gemini-exp-1206",
+  "gemini-3-pro-preview",
+  "gemini-3.1-pro-preview",
   "learnlm-2.0-flash-experimental",
 ];
 
 const anthropicModels = [
-  "claude-3-haiku-20240307",
-  "claude-3-sonnet-20240229",
-  "claude-3-opus-20240229",
-  "claude-3-5-haiku-20241022",
-  "claude-3-5-sonnet-20240620",
-  "claude-3-5-sonnet-20241022",
-  "claude-3-7-sonnet-20250219",
+  "claude-haiku-4-5-20251001",
   "claude-sonnet-4-20250514",
+  "claude-sonnet-4-5-20250929",
+  "claude-sonnet-4-6",
+
   "claude-opus-4-20250514",
   "claude-opus-4-1-20250805",
+  "claude-opus-4-5-20251101",
+  "claude-opus-4-6",
+  "claude-opus-4-7",
 ];
 
 export const DEFAULT_MODELS = [
