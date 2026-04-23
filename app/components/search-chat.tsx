@@ -74,6 +74,7 @@ export function SearchChatPage() {
 
   const previousValueRef = useRef<string>("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
   const doSearch = useCallback(
     (text: string) => {
       const lowerCaseText = text.toLowerCase();
@@ -125,7 +126,7 @@ export function SearchChatPage() {
 
   useEffect(() => {
     const intervalId = setInterval(() => {
-      if (searchInputRef.current) {
+      if (searchInputRef.current && !isComposingRef.current) {
         const currentValue = searchInputRef.current.value;
         if (currentValue !== previousValueRef.current) {
           if (currentValue.length > 0) {
@@ -178,8 +179,20 @@ export function SearchChatPage() {
               placeholder={Locale.SearchChat.Page.Search}
               autoFocus
               ref={searchInputRef}
+              onCompositionStart={() => (isComposingRef.current = true)}
+              onCompositionEnd={(e) => {
+                isComposingRef.current = false;
+                const searchText = e.currentTarget.value;
+                if (searchText.length > 0) {
+                  const result = doSearch(searchText);
+                  setSearchResults(result);
+                } else {
+                  setSearchResults([]);
+                }
+                previousValueRef.current = searchText;
+              }}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "Enter" && !isComposingRef.current) {
                   e.preventDefault();
                   const searchText = e.currentTarget.value;
                   if (searchText.length > 0) {

@@ -1,6 +1,6 @@
 // src/cloud-backup.tsx
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import styles from "./cloud-backup.module.scss";
 import { useAccessStore } from "../store";
 import {
@@ -42,7 +42,6 @@ export function CloudBackupPage() {
   };
   const [uploadProgress, setUploadProgress] = useState(0);
   const [files, setFiles] = useState<FileInfo[]>([]);
-  const [searchKeyword, setSearchKeyword] = useState("");
   const [importingFileNames, setImportingFileNames] = useState<Set<string>>(
     new Set(),
   );
@@ -52,9 +51,21 @@ export function CloudBackupPage() {
   const [renameInputs, setRenameInputs] = useState<{ [key: string]: string }>(
     {},
   );
-  // 添加文件名搜索处理函数
+  const autoLoadedRef = useRef(false);
+  const isComposingRef = useRef(false);
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [displaySearchKeyword, setDisplaySearchKeyword] = useState("");
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchKeyword(e.target.value);
+    setDisplaySearchKeyword(e.target.value);
+    if (!isComposingRef.current) {
+      setSearchKeyword(e.target.value);
+    }
+  };
+  const handleCompositionEnd = (
+    e: React.CompositionEvent<HTMLInputElement>,
+  ) => {
+    isComposingRef.current = false;
+    setSearchKeyword(e.currentTarget.value);
   };
   // 过滤显示的文件列表
   const filteredFiles = files.filter((file) =>
@@ -63,7 +74,7 @@ export function CloudBackupPage() {
 
   const accessStore = useAccessStore();
   const chatStore = useChatStore();
-  var collisionString = "";
+  const collisionStringRef = useRef("");
 
   useEffect(() => {
     // 从 localStorage 读取文件服务器地址
@@ -72,6 +83,15 @@ export function CloudBackupPage() {
       setServerAddress(savedAddress);
     }
   }, []);
+
+  // 进入页面自动加载云端文件列表
+  useEffect(() => {
+    if (serverAddress && !autoLoadedRef.current) {
+      autoLoadedRef.current = true;
+      handleFetchFileList();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverAddress]);
 
   const handleServerAddressChange = (address: string) => {
     setServerAddress(address);
@@ -88,7 +108,7 @@ export function CloudBackupPage() {
     }
     try {
       const parsedUrl = new URL(serverAddress);
-      collisionString = parsedUrl.hostname;
+      collisionStringRef.current = parsedUrl.hostname;
     } catch (error) {
       setMessage({ text: "无效的文件服务器地址", type: "error" });
       return;
@@ -124,7 +144,7 @@ export function CloudBackupPage() {
     xhr.open("POST", `${serverAddress}/api/backup`, true);
     // 设置请求头
     xhr.setRequestHeader("accessCode", accessStore.accessCode);
-    xhr.setRequestHeader("collisionString", collisionString);
+    xhr.setRequestHeader("collisionString", collisionStringRef.current);
 
     // 监听上传进度事件
     xhr.upload.onprogress = (event) => {
@@ -141,7 +161,7 @@ export function CloudBackupPage() {
         showToast(data.message || "云备份成功！");
         setMessage({ text: data.message || "云备份成功！", type: "success" });
         // 执行一次云导入更新列表
-        handleImport();
+        handleFetchFileList();
       } else {
         const errorData = JSON.parse(xhr.responseText);
         setMessage({
@@ -165,14 +185,14 @@ export function CloudBackupPage() {
     xhr.send(formData);
   };
 
-  const handleImport = async () => {
+  const handleFetchFileList = async () => {
     if (serverAddress.trim() === "") {
       setMessage({ text: "文件服务器地址不能为空", type: "error" });
       return;
     }
     try {
       const parsedUrl = new URL(serverAddress);
-      collisionString = parsedUrl.hostname;
+      collisionStringRef.current = parsedUrl.hostname;
     } catch (error) {
       setMessage({ text: "无效的文件服务器地址", type: "error" });
       return;
@@ -183,7 +203,7 @@ export function CloudBackupPage() {
       const response = await fetch(`${serverAddress}/api/getlist`, {
         headers: {
           accessCode: accessStore.accessCode,
-          collisionString: collisionString,
+          collisionString: collisionStringRef.current,
         },
       });
       if (!response.ok) {
@@ -238,7 +258,7 @@ export function CloudBackupPage() {
     }
     try {
       const parsedUrl = new URL(serverAddress);
-      collisionString = parsedUrl.hostname;
+      collisionStringRef.current = parsedUrl.hostname;
     } catch (error) {
       setMessage({ text: "无效的文件服务器地址", type: "error" });
       return;
@@ -251,7 +271,7 @@ export function CloudBackupPage() {
         headers: {
           "Content-Type": "application/json",
           accessCode: accessStore.accessCode,
-          collisionString: collisionString,
+          collisionString: collisionStringRef.current,
         },
         body: JSON.stringify({ oldName: fileName, newName }),
       });
@@ -292,7 +312,7 @@ export function CloudBackupPage() {
     }
     try {
       const parsedUrl = new URL(serverAddress);
-      collisionString = parsedUrl.hostname;
+      collisionStringRef.current = parsedUrl.hostname;
     } catch (error) {
       setMessage({ text: "无效的文件服务器地址", type: "error" });
       return;
@@ -306,7 +326,7 @@ export function CloudBackupPage() {
           method: "GET",
           headers: {
             accessCode: accessStore.accessCode,
-            collisionString: collisionString,
+            collisionString: collisionStringRef.current,
           },
         },
       );
@@ -351,7 +371,7 @@ export function CloudBackupPage() {
     }
     try {
       const parsedUrl = new URL(serverAddress);
-      collisionString = parsedUrl.hostname;
+      collisionStringRef.current = parsedUrl.hostname;
     } catch (error) {
       setMessage({ text: "无效的文件服务器地址", type: "error" });
       return;
@@ -364,7 +384,7 @@ export function CloudBackupPage() {
         headers: {
           "Content-Type": "application/json",
           accessCode: accessStore.accessCode,
-          collisionString: collisionString,
+          collisionString: collisionStringRef.current,
         },
       });
       if (!response.ok) {
@@ -402,7 +422,7 @@ export function CloudBackupPage() {
     }
     try {
       const parsedUrl = new URL(serverAddress);
-      collisionString = parsedUrl.hostname;
+      collisionStringRef.current = parsedUrl.hostname;
     } catch (error) {
       setMessage({ text: "无效的文件服务器地址", type: "error" });
       return;
@@ -414,7 +434,7 @@ export function CloudBackupPage() {
         method: "DELETE",
         headers: {
           accessCode: accessStore.accessCode,
-          collisionString: collisionString,
+          collisionString: collisionStringRef.current,
         },
       });
       if (!response.ok) {
@@ -472,46 +492,40 @@ export function CloudBackupPage() {
             disabled={loading}
             className={styles.input}
           />
-          <IconButton
-            text={"清除文件服务器地址"}
-            onClick={async () => {
-              clearServerAddress();
-            }}
-            type="primary"
-            style={{
-              marginRight: "10px",
-              marginTop: "5px",
-              marginBottom: "10px",
-            }}
-          />
-          <IconButton
-            text={"清除本地所有对话"}
-            onClick={async () => {
-              if (await showConfirm(Locale.Settings.Danger.ClearChat.Confirm)) {
-                chatStore.clearAllChatData();
-              }
-            }}
-            type="danger"
-            style={{
-              marginRight: "10px",
-              marginTop: "5px",
-              marginBottom: "10px",
-            }}
-          />
-          <IconButton
-            text={"清除云端所有对话"}
-            onClick={async () => {
-              if (await showConfirm(Locale.Settings.Danger.ClearChat.Confirm)) {
-                await handleALLFileDelete();
-              }
-            }}
-            type="danger"
-            style={{
-              marginRight: "10px",
-              marginTop: "5px",
-              marginBottom: "10px",
-            }}
-          />
+          <div className={styles.clearButtonGroup}>
+            <IconButton
+              text={"清除文件服务器地址"}
+              onClick={async () => {
+                clearServerAddress();
+              }}
+              type="primary"
+              className={styles.clearButton}
+            />
+            <IconButton
+              text={"清除本地所有对话"}
+              onClick={async () => {
+                if (
+                  await showConfirm(Locale.Settings.Danger.ClearChat.Confirm)
+                ) {
+                  chatStore.clearAllChatData();
+                }
+              }}
+              type="danger"
+              className={styles.clearButton}
+            />
+            <IconButton
+              text={"清除云端所有对话"}
+              onClick={async () => {
+                if (
+                  await showConfirm(Locale.Settings.Danger.ClearChat.Confirm)
+                ) {
+                  await handleALLFileDelete();
+                }
+              }}
+              type="danger"
+              className={styles.clearButton}
+            />
+          </div>
         </div>
         <div className={styles.buttonGroup}>
           <button
@@ -520,25 +534,27 @@ export function CloudBackupPage() {
             className={styles.button}
           >
             {backupLoading ? "上传中..." : "云备份(本地记录上传云端)"}
-            {backupLoading && (
-              <div style={{ margin: "10px 0" }}>
-                <progress
-                  value={uploadProgress}
-                  max="100"
-                  style={{ width: "100%" }}
-                />
-                <span>{uploadProgress}%</span>
-              </div>
-            )}
           </button>
           <button
-            onClick={handleImport}
+            onClick={handleFetchFileList}
             disabled={importLoading}
             className={styles.button}
           >
             {importLoading ? "加载中..." : "云导入(加载云端记录)"}
           </button>
         </div>
+        {backupLoading && (
+          <div className={styles.progressContainer}>
+            <div className={styles.progressLabel}>
+              上传中... {uploadProgress}%
+            </div>
+            <progress
+              value={uploadProgress}
+              max="100"
+              className={styles.progressBar}
+            />
+          </div>
+        )}
         {message && (
           <div
             className={styles.message}
@@ -549,21 +565,24 @@ export function CloudBackupPage() {
             {message.text}
           </div>
         )}
+        {files.length > 0 && (
+          <div className={styles.searchContainer}>
+            <input
+              type="text"
+              value={displaySearchKeyword}
+              onChange={handleSearchChange}
+              onCompositionStart={() => (isComposingRef.current = true)}
+              onCompositionEnd={handleCompositionEnd}
+              placeholder="搜索文件名..."
+              className={styles.searchInput}
+            />
+          </div>
+        )}
       </div>
 
       {/* 文件列表展示，独立滑动区域 */}
       {files.length > 0 && (
         <div className={styles["file-list-container"]}>
-          <h3 className={styles.subtitle}>文件列表</h3>
-          <div className={styles.searchContainer}>
-            <input
-              type="text"
-              value={searchKeyword}
-              onChange={handleSearchChange}
-              placeholder="搜索文件名..."
-              className={styles.searchInput}
-            />
-          </div>
           <ul className={styles.list}>
             {filteredFiles.map((file) => (
               <li key={file.name} className={styles.listItem}>

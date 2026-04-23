@@ -141,6 +141,14 @@ class IndexedDBStorage implements StateStorage {
     this.pending.clear();
     await this._clear();
   }
+
+  public async flushPending(): Promise<void> {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    await this.flush();
+  }
 }
 
 export const indexedDBStorage = new IndexedDBStorage();

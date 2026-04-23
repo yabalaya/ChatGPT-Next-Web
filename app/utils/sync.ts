@@ -154,6 +154,7 @@ export function mergeAppState(localState: AppState, remoteState: AppState) {
     const key = k as T;
     const localStoreState = localState[key];
     const remoteStoreState = remoteState[key];
+    if (!remoteStoreState) return; // 远程数据缺失则跳过
     MergeStates[key](localStoreState, remoteStoreState);
   });
 
@@ -165,8 +166,9 @@ export function mergeAppState(localState: AppState, remoteState: AppState) {
  */
 export function mergeWithUpdate<T extends { lastUpdateTime?: number }>(
   localState: T,
-  remoteState: T,
+  remoteState: T | undefined,
 ) {
+  if (!remoteState) return localState;
   const localUpdateTime = localState.lastUpdateTime ?? 0;
   const remoteUpdateTime = remoteState.lastUpdateTime ?? 1;
 
