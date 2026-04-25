@@ -314,6 +314,14 @@ export class ChatGPTApi implements LLMApi {
         messages.push({ role: v.role, content });
     }
 
+    // 合并连续的 system 消息
+    for (let i = messages.length - 1; i > 0; i--) {
+      if (messages[i].role === "system" && messages[i - 1].role === "system") {
+        messages[i - 1].content += "\n\n" + messages[i].content;
+        messages.splice(i, 1);
+      }
+    }
+
     // For claude model: roles must alternate between "user" and "assistant" in claude, so add a fake assistant message between two user messages
     // const keys = ["system", "user"];
     if (isClaude) {
@@ -329,9 +337,9 @@ export class ChatGPTApi implements LLMApi {
 
       // 如果第一条消息是 system，确保其后跟着的是 user 消息
       if (messages[0]?.role === "system") {
-        let index = 1; // 从 system 后的第一条消息开始检查
+        let index = 1;
         while (index < messages.length && messages[index].role !== "user") {
-          messages.splice(index, 1); // 删除非 user 消息
+          messages.splice(index, 1);
         }
       }
       // 检查消息的顺序，添加或删除消息以确保 user 和 assistant 交替出现
