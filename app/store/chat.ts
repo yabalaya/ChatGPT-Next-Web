@@ -42,6 +42,9 @@ export type ChatMessage = RequestMessage & {
   streaming?: boolean;
   isError?: boolean;
   id: string;
+  parentId?: string;
+  childrenIds?: string[];
+  activeChildId?: string;
   model?: ModelType;
   displayName?: string;
   providerName?: string;
@@ -100,6 +103,9 @@ export interface ChatSession {
   topic: string;
 
   memoryPrompt: string;
+  messageTree?: Record<string, ChatMessage>;
+  rootMessageIds?: string[];
+  activeRootId?: string;
   messages: ChatMessage[];
   stat: ChatStat;
   lastUpdate: number;
@@ -141,11 +147,307 @@ export const BOT_HELLO: ChatMessage = createMessage({
   content: Locale.Store.BotHello,
 });
 
+const NO_ACTIVE_MESSAGE = "";
+
+function normalizeTreeNode(message: ChatMessage) {
+  message.childrenIds = message.childrenIds?.filter(Boolean) ?? [];
+  return message;
+}
+
+export function rebuildMessageTreeFromMessages(session: ChatSession) {
+  const tree: Record<string, ChatMessage> = {};
+  const rootMessageIds: string[] = [];
+  let parent: ChatMessage | undefined;
+
+  session.messages.forEach((message) => {
+    normalizeTreeNode(message);
+    message.parentId = parent?.id;
+    message.childrenIds = [];
+    message.activeChildId = undefined;
+    tree[message.id] = message;
+
+    if (parent) {
+      parent.childrenIds = [message.id];
+      parent.activeChildId = message.id;
+    } else {
+      rootMessageIds.push(message.id);
+    }
+    parent = message;
+  });
+
+  session.messageTree = tree;
+  session.rootMessageIds = rootMessageIds;
+  session.activeRootId = rootMessageIds[0];
+}
+
+export function getActiveMessagePath(session: ChatSession) {
+  const tree = session.messageTree;
+  if (!tree) return session.messages;
+
+  const rootIds = (session.rootMessageIds ?? []).filter((id) => tree[id]);
+  let currentId: string | undefined =
+    session.activeRootId === undefined ? rootIds[0] : session.activeRootId;
+
+  if (!currentId || currentId === NO_ACTIVE_MESSAGE) return [];
+
+  const messages: ChatMessage[] = [];
+  const visited = new Set<string>();
+  while (currentId && !visited.has(currentId)) {
+    const message: ChatMessage | undefined = tree[currentId];
+    if (!message) break;
+    visited.add(currentId);
+    normalizeTreeNode(message);
+    messages.push(message);
+
+    const nextId: string | undefined = message.activeChildId;
+    if (!nextId || nextId === NO_ACTIVE_MESSAGE || !tree[nextId]) break;
+    currentId = nextId;
+  }
+
+  return messages;
+}
+
+export function syncMessagesFromTree(session: ChatSession) {
+  if (!session.messageTree) return;
+  session.messages = getActiveMessagePath(session);
+}
+
+function restoreActiveDescendantPath(session: ChatSession, messageId: string) {
+  const tree = session.messageTree;
+  if (!tree) return;
+
+  const visited = new Set<string>();
+  let current = tree[messageId];
+
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    normalizeTreeNode(current);
+
+    const activeChildId = current.activeChildId;
+    const activeChildExists =
+      !!activeChildId &&
+      activeChildId !== NO_ACTIVE_MESSAGE &&
+      !!tree[activeChildId];
+
+    if (!activeChildExists) {
+      const fallbackChildId = current.childrenIds
+        ?.filter((id) => tree[id])
+        .at(-1);
+
+      if (!fallbackChildId) break;
+      current.activeChildId = fallbackChildId;
+    }
+
+    const nextId = current.activeChildId;
+    if (!nextId || nextId === NO_ACTIVE_MESSAGE) break;
+    current = tree[nextId];
+  }
+}
+
+export function ensureMessageTree(session: ChatSession) {
+  const messageIds = session.messages.map((m) => m.id);
+  const missingActiveMessage =
+    !session.messageTree || messageIds.some((id) => !session.messageTree?.[id]);
+
+  if (missingActiveMessage) {
+    rebuildMessageTreeFromMessages(session);
+    return;
+  }
+
+  const tree = session.messageTree;
+  if (!tree) return;
+
+  Object.values(tree).forEach(normalizeTreeNode);
+  session.rootMessageIds =
+    session.rootMessageIds?.filter((id) => tree[id]) ??
+    Object.values(tree)
+      .filter((message) => !message.parentId)
+      .map((message) => message.id);
+
+  if (
+    session.activeRootId !== NO_ACTIVE_MESSAGE &&
+    session.activeRootId &&
+    !tree[session.activeRootId]
+  ) {
+    session.activeRootId = session.rootMessageIds[0];
+  }
+
+  syncMessagesFromTree(session);
+}
+
+export function activateMessagePath(
+  session: ChatSession,
+  messageId: string | null,
+  options?: { truncate?: boolean },
+) {
+  ensureMessageTree(session);
+  const tree = session.messageTree;
+  if (!tree) return;
+
+  if (messageId === null) {
+    session.activeRootId = NO_ACTIVE_MESSAGE;
+    session.messages = [];
+    return;
+  }
+
+  const target = tree[messageId];
+  if (!target) {
+    syncMessagesFromTree(session);
+    return;
+  }
+
+  const path: ChatMessage[] = [];
+  const visited = new Set<string>();
+  let current: ChatMessage | undefined = target;
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    path.unshift(current);
+    current = current.parentId ? tree[current.parentId] : undefined;
+  }
+
+  session.activeRootId = path[0]?.id;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    path[i].activeChildId = path[i + 1].id;
+  }
+  if (options?.truncate) {
+    target.activeChildId = NO_ACTIVE_MESSAGE;
+  } else {
+    restoreActiveDescendantPath(session, target.id);
+  }
+  syncMessagesFromTree(session);
+}
+
+export function appendMessagesToActivePath(
+  session: ChatSession,
+  newMessages: ChatMessage[],
+) {
+  ensureMessageTree(session);
+  if (!session.messageTree) {
+    rebuildMessageTreeFromMessages(session);
+  }
+
+  const tree = session.messageTree!;
+  let parent = getActiveMessagePath(session).at(-1);
+
+  newMessages.forEach((message) => {
+    normalizeTreeNode(message);
+    message.parentId = parent?.id;
+    message.childrenIds = [];
+    message.activeChildId = undefined;
+    tree[message.id] = message;
+
+    if (parent) {
+      const parentNode = tree[parent.id];
+      parentNode.childrenIds = (parentNode.childrenIds ?? []).filter(
+        (id) => id !== message.id && tree[id],
+      );
+      parentNode.childrenIds.push(message.id);
+      parentNode.activeChildId = message.id;
+    } else {
+      session.rootMessageIds = (session.rootMessageIds ?? []).filter(
+        (id) => id !== message.id && tree[id],
+      );
+      session.rootMessageIds.push(message.id);
+      session.activeRootId = message.id;
+    }
+
+    parent = message;
+  });
+
+  syncMessagesFromTree(session);
+}
+
+export function removeMessageFromTree(session: ChatSession, messageId: string) {
+  ensureMessageTree(session);
+  const tree = session.messageTree;
+  if (!tree?.[messageId]) return;
+
+  const message = tree[messageId];
+  const idsToDelete: string[] = [];
+  const collect = (id: string) => {
+    const node = tree[id];
+    if (!node) return;
+    idsToDelete.push(id);
+    (node.childrenIds ?? []).forEach(collect);
+  };
+  collect(messageId);
+
+  const siblings = message.parentId
+    ? tree[message.parentId]?.childrenIds ?? []
+    : session.rootMessageIds ?? [];
+  const deletingIndex = siblings.indexOf(messageId);
+  const nextSiblings = siblings.filter((id) => !idsToDelete.includes(id));
+  const nextActiveId =
+    nextSiblings[
+      Math.min(Math.max(deletingIndex, 0), Math.max(nextSiblings.length - 1, 0))
+    ] ?? NO_ACTIVE_MESSAGE;
+
+  idsToDelete.forEach((id) => delete tree[id]);
+
+  if (message.parentId && tree[message.parentId]) {
+    tree[message.parentId].childrenIds = nextSiblings;
+    tree[message.parentId].activeChildId = nextActiveId;
+  } else {
+    session.rootMessageIds = nextSiblings;
+    session.activeRootId = nextActiveId;
+  }
+
+  syncMessagesFromTree(session);
+}
+
+export function getMessageBranchInfo(session: ChatSession, messageId: string) {
+  ensureMessageTree(session);
+  const tree = session.messageTree;
+  const message = tree?.[messageId];
+  if (!tree || !message) return null;
+
+  const siblings = (
+    message.parentId
+      ? tree[message.parentId]?.childrenIds ?? []
+      : session.rootMessageIds ?? []
+  ).filter((id) => tree[id]);
+  const index = siblings.indexOf(messageId);
+
+  if (index < 0 || siblings.length <= 1) return null;
+  return {
+    current: index + 1,
+    total: siblings.length,
+  };
+}
+
+export function switchMessageBranchInSession(
+  session: ChatSession,
+  messageId: string,
+  delta: number,
+) {
+  ensureMessageTree(session);
+  const tree = session.messageTree;
+  const message = tree?.[messageId];
+  if (!tree || !message) return;
+
+  const siblings = (
+    message.parentId
+      ? tree[message.parentId]?.childrenIds ?? []
+      : session.rootMessageIds ?? []
+  ).filter((id) => tree[id]);
+  const index = siblings.indexOf(messageId);
+  if (index < 0 || siblings.length <= 1) return;
+
+  const nextIndex = index + delta;
+  if (nextIndex < 0 || nextIndex >= siblings.length) return;
+
+  const nextId = siblings[nextIndex];
+  activateMessagePath(session, nextId);
+}
+
 function createEmptySession(): ChatSession {
   return {
     id: nanoid(),
     topic: DEFAULT_TOPIC,
     memoryPrompt: "",
+    messageTree: {},
+    rootMessageIds: [],
+    activeRootId: undefined,
     messages: [],
     stat: {
       tokenCount: 0,
@@ -294,7 +596,11 @@ export const useChatStore = createPersistStore(
         newSession.messages = currentSession.messages.map((msg) => ({
           ...msg,
           id: nanoid(), // 生成新的消息 ID
+          parentId: undefined,
+          childrenIds: [],
+          activeChildId: undefined,
         }));
+        rebuildMessageTreeFromMessages(newSession);
         newSession.mask = {
           ...currentSession.mask,
           modelConfig: {
@@ -464,12 +770,14 @@ export const useChatStore = createPersistStore(
         }
 
         const session = sessions[index];
+        ensureMessageTree(session);
 
         return session;
       },
 
       onNewMessage(message: ChatMessage, targetSession: ChatSession) {
         get().updateTargetSession(targetSession, (session) => {
+          syncMessagesFromTree(session);
           session.messages = session.messages.concat();
           session.lastUpdate = Date.now();
         });
@@ -489,7 +797,14 @@ export const useChatStore = createPersistStore(
           startOffset?: number;
           endOffset?: number;
         },
+        branchParentId?: string | null,
       ) {
+        if (branchParentId !== undefined) {
+          get().updateCurrentSession((session) => {
+            activateMessagePath(session, branchParentId, { truncate: true });
+          });
+        }
+
         const session = get().currentSession();
         const modelConfig = session.mask.modelConfig;
 
@@ -628,10 +943,7 @@ export const useChatStore = createPersistStore(
             content: displayContent,
             modelSource: "primary" as const,
           };
-          session.messages = session.messages.concat([
-            savedUserMessage,
-            botMessage,
-          ]);
+          appendMessagesToActivePath(session, [savedUserMessage, botMessage]);
 
           // 双模型模式：同时保存到副模型消息队列
           if (
@@ -999,9 +1311,18 @@ export const useChatStore = createPersistStore(
         set(() => ({ sessions }));
       },
 
+      switchMessageBranch(messageId: string, delta: number) {
+        get().updateCurrentSession((session) => {
+          switchMessageBranchInSession(session, messageId, delta);
+        });
+      },
+
       resetSession() {
         get().updateCurrentSession((session) => {
           session.messages = [];
+          session.messageTree = {};
+          session.rootMessageIds = [];
+          session.activeRootId = undefined;
           session.memoryPrompt = "";
           session.secondaryClearContextIndex = undefined;
         });
@@ -1245,6 +1566,7 @@ export const useChatStore = createPersistStore(
       updateCurrentSession(updater: (session: ChatSession) => void) {
         const sessions = get().sessions;
         const index = get().currentSessionIndex;
+        ensureMessageTree(sessions[index]);
         updater(sessions[index]);
         set(() => ({ sessions }));
       },
@@ -1252,6 +1574,7 @@ export const useChatStore = createPersistStore(
       updateSession(index: number, updater: (session: ChatSession) => void) {
         const sessions = get().sessions;
         if (index < 0 || index >= sessions.length) return;
+        ensureMessageTree(sessions[index]);
         updater(sessions[index]);
         set(() => ({ sessions }));
       },
@@ -1263,14 +1586,15 @@ export const useChatStore = createPersistStore(
         const sessions = get().sessions;
         const index = sessions.findIndex((s) => s.id === targetSession.id);
         if (index < 0) return;
+        ensureMessageTree(sessions[index]);
         // Save message content before updates to compare later
-        const messagesBeforeUpdate = JSON.stringify(
-          sessions[index].messages.map((m) =>
+        const messagesBeforeUpdate = sessions[index].messages.map((m) => ({
+          id: m.id,
+          content:
             typeof m.content === "string"
               ? m.content
               : getMessageTextContent(m),
-          ),
-        );
+        }));
         updater(sessions[index]);
         // Check if any message content has changed and update token stats
         const updatedSession = sessions[index];
@@ -1278,11 +1602,12 @@ export const useChatStore = createPersistStore(
           typeof m.content === "string" ? m.content : getMessageTextContent(m),
         );
         // Update token counts for any changed messages
-        const beforeMessages = JSON.parse(messagesBeforeUpdate);
         updatedSession.messages.forEach((message, i) => {
+          const beforeMessage = messagesBeforeUpdate[i];
           if (
-            i < beforeMessages.length &&
-            messagesAfterUpdate[i] !== beforeMessages[i]
+            beforeMessage &&
+            beforeMessage.id === message.id &&
+            messagesAfterUpdate[i] !== beforeMessage.content
           ) {
             // Content changed, update token count
             if (!message.statistic) {
@@ -1495,7 +1820,7 @@ export const useChatStore = createPersistStore(
   },
   {
     name: StoreKey.Chat,
-    version: 3.4,
+    version: 3.5,
     migrate(persistedState, version) {
       const state = persistedState as any;
       const newState = JSON.parse(
@@ -1573,6 +1898,11 @@ export const useChatStore = createPersistStore(
         newState.sessions.forEach((s) => {
           // 为旧数据添加置顶相关字段的默认值
           s.pinned = s.pinned || false;
+        });
+      }
+      if (version < 3.5) {
+        newState.sessions.forEach((s) => {
+          rebuildMessageTreeFromMessages(s);
         });
       }
 

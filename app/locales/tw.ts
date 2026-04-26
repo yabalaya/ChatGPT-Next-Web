@@ -102,6 +102,21 @@ const tw = {
       UploadImage: "上傳圖片",
     },
     Rename: "重新命名對話",
+    Navigator: {
+      Title: "對話導航",
+      Toggle: "打開對話導航",
+      Close: "收起對話導航",
+      Empty: "暫無訊息",
+      Search: "搜尋訊息...",
+      NoResults: "無匹配結果",
+      List: "列表",
+      Structure: "結構",
+      Graph: "樹圖",
+      StructureEmpty: "暫無對話結構",
+      EmptyMessage: "(空訊息)",
+      User: "使用者",
+      Assistant: "助手",
+    },
     Typing: "正在輸入…",
     Input: (submitKey: string) => {
       var inputHints = `輸入訊息後，按下 ${submitKey} 鍵即可傳送`;

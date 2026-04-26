@@ -73,8 +73,14 @@ import {
   useAccessStore,
   Theme,
   useAppConfig,
+  ChatSession,
   DEFAULT_TOPIC,
   ModelType,
+  activateMessagePath,
+  appendMessagesToActivePath,
+  getMessageBranchInfo,
+  rebuildMessageTreeFromMessages,
+  removeMessageFromTree,
 } from "../store";
 
 import {
@@ -1696,10 +1702,10 @@ export function EditMessageModal(props: { onClose: () => void }) {
             icon={<ConfirmIcon />}
             key="ok"
             onClick={() => {
-              chatStore.updateTargetSession(
-                session,
-                (session) => (session.messages = messages),
-              );
+              chatStore.updateTargetSession(session, (session) => {
+                session.messages = messages;
+                rebuildMessageTreeFromMessages(session);
+              });
               props.onClose();
             }}
           />,
@@ -1821,12 +1827,12 @@ export function ShortcutKeyModal(props: { onClose: () => void }) {
 }
 
 function ChatInputActions(props: {
-  message: any; // 根据实际情况定义 message 的类型
+  message: ChatMessage;
   onUserStop: (messageId: string) => void;
-  onResend: (message: any) => void;
+  onResend: (message: ChatMessage) => void;
   onDelete: (msgId: string) => void;
   onBreak: (msgId: string) => void;
-  onPinMessage: (message: any) => void;
+  onPinMessage: (message: ChatMessage) => void;
   copyToClipboard: (text: string) => void;
   openaiSpeech: (text: string) => void;
   setUserInput: (text: string) => void;
@@ -1908,6 +1914,42 @@ function ChatInputActions(props: {
   );
 }
 
+function MessageBranchSwitcher(props: {
+  branchInfo: { current: number; total: number };
+  onSwitch: (delta: number) => void;
+}) {
+  const canSwitchPrev = props.branchInfo.current > 1;
+  const canSwitchNext = props.branchInfo.current < props.branchInfo.total;
+
+  return (
+    <div className={styles["message-branch-switcher"]}>
+      <button
+        type="button"
+        className={styles["message-branch-button"]}
+        disabled={!canSwitchPrev}
+        onClick={() => canSwitchPrev && props.onSwitch(-1)}
+        title="上一分支"
+        aria-label="上一分支"
+      >
+        {"<"}
+      </button>
+      <span className={styles["message-branch-count"]}>
+        {props.branchInfo.current}/{props.branchInfo.total}
+      </span>
+      <button
+        type="button"
+        className={styles["message-branch-button"]}
+        disabled={!canSwitchNext}
+        onClick={() => canSwitchNext && props.onSwitch(1)}
+        title="下一分支"
+        aria-label="下一分支"
+      >
+        {">"}
+      </button>
+    </div>
+  );
+}
+
 // 通用 Tooltip 包装组件
 function Tooltip(props: {
   content: string;
@@ -1979,6 +2021,7 @@ function DualModelToggle(props: { enabled: boolean; onToggle: () => void }) {
 
 // 双模型视图组件
 type RenderMessageType = ChatMessage & { preview?: boolean };
+type ChatNavigatorViewMode = "list" | "structure" | "graph";
 
 function DualModelView(props: {
   primaryMessages: ChatMessage[];
@@ -1995,6 +2038,10 @@ function DualModelView(props: {
   config: any;
   onPrimaryModelSelect: () => void;
   onSecondaryModelSelect: () => void;
+  treeSession?: ChatSession;
+  onActivateTreeNode?: (messageId: string) => void;
+  navigatorViewMode: ChatNavigatorViewMode;
+  onNavigatorViewModeChange: (viewMode: ChatNavigatorViewMode) => void;
   onScrollBothToBottom?: (fn: (instant?: boolean) => void) => void; // 注册滚动到底部的回调
 }) {
   const modelTable = useModelTable();
@@ -2220,6 +2267,9 @@ function DualModelView(props: {
           )}
           <ChatNavigator
             messages={primaryRenderMessages}
+            treeSession={props.treeSession}
+            viewMode={props.navigatorViewMode}
+            onViewModeChange={props.onNavigatorViewModeChange}
             currentIndex={getCurrentUserIndex(
               primaryVisibleRange,
               primaryRenderMessages,
@@ -2229,6 +2279,21 @@ function DualModelView(props: {
                 index,
                 align: "start",
                 behavior: "auto",
+              });
+            }}
+            onActivateTreeNode={(messageId) => {
+              props.onActivateTreeNode?.(messageId);
+              requestAnimationFrame(() => {
+                const index = primaryRenderMessages.findIndex(
+                  (message) => message.id === messageId,
+                );
+                if (index >= 0) {
+                  primaryVirtuosoRef.current?.scrollToIndex({
+                    index,
+                    align: "center",
+                    behavior: "auto",
+                  });
+                }
               });
             }}
             inPanel
@@ -2315,17 +2380,71 @@ function ChatNavigator(props: {
   messages: ChatMessage[];
   currentIndex: number | null;
   onJumpTo: (index: number) => void;
+  treeSession?: ChatSession;
+  onActivateTreeNode?: (messageId: string) => void;
+  viewMode?: ChatNavigatorViewMode;
+  onViewModeChange?: (viewMode: ChatNavigatorViewMode) => void;
   inPanel?: boolean; // 是否在双模型 panel 内
 }) {
   const PREVIEW_LENGTH = 20;
   const listRef = useRef<HTMLDivElement>(null);
   const activeItemRef = useRef<HTMLDivElement>(null);
   const navigatorRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [internalViewMode, setInternalViewMode] =
+    useState<ChatNavigatorViewMode>("list");
+  const controlledViewMode = props.viewMode;
+  const onViewModeChange = props.onViewModeChange;
+  const viewMode = controlledViewMode ?? internalViewMode;
+  const setNavigatorViewMode = useCallback(
+    (nextViewMode: ChatNavigatorViewMode) => {
+      if (controlledViewMode === undefined) {
+        setInternalViewMode(nextViewMode);
+      }
+      onViewModeChange?.(nextViewMode);
+    },
+    [controlledViewMode, onViewModeChange],
+  );
+  const canShowStructure = !!props.treeSession?.messageTree;
+  const effectiveViewMode = canShowStructure ? viewMode : "list";
 
-  // 面板是否应该保持展开（搜索框聚焦或有搜索内容时）
-  const shouldKeepOpen = isSearchFocused || searchQuery.trim().length > 0;
+  const shouldKeepOpen =
+    isOpen || isSearchFocused || searchQuery.trim().length > 0;
+
+  const cancelCloseTimer = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const openNavigator = useCallback(() => {
+    cancelCloseTimer();
+    setIsOpen(true);
+  }, [cancelCloseTimer]);
+
+  const closeNavigator = useCallback(() => {
+    cancelCloseTimer();
+    setIsSearchFocused(false);
+    setSearchQuery("");
+    setIsOpen(false);
+  }, [cancelCloseTimer]);
+
+  const scheduleCloseNavigator = useCallback(() => {
+    cancelCloseTimer();
+    closeTimerRef.current = setTimeout(() => {
+      if (isSearchFocused) return;
+      setIsOpen(false);
+      setSearchQuery("");
+    }, 140);
+  }, [cancelCloseTimer, isSearchFocused]);
+
+  useEffect(() => {
+    return () => cancelCloseTimer();
+  }, [cancelCloseTimer]);
 
   // 点击导航区外部时清空搜索
   useEffect(() => {
@@ -2336,13 +2455,13 @@ function ChatNavigator(props: {
         navigatorRef.current &&
         !navigatorRef.current.contains(e.target as Node)
       ) {
-        setSearchQuery("");
+        closeNavigator();
       }
     };
 
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
-  }, [shouldKeepOpen]);
+  }, [closeNavigator, shouldKeepOpen]);
 
   // 生成消息列表（用户消息 or 搜索结果）
   const displayMessages = useMemo(() => {
@@ -2366,6 +2485,208 @@ function ChatNavigator(props: {
     return allMessages.filter((msg) => msg.role === "user");
   }, [props.messages, searchQuery]);
 
+  const activePathIndexById = useMemo(() => {
+    const indexes = new Map<string, number>();
+    props.messages.forEach((message, index) => {
+      if (message.id) indexes.set(message.id, index);
+    });
+    return indexes;
+  }, [props.messages]);
+
+  const structureRows = useMemo(() => {
+    const session = props.treeSession;
+    const tree = session?.messageTree;
+    if (!session || !tree) return [];
+
+    return session.messages.map((message, pathIndex) => {
+      const siblingIds = (
+        message.parentId
+          ? tree[message.parentId]?.childrenIds ?? []
+          : session.rootMessageIds ?? []
+      ).filter((id) => tree[id]);
+      const activeSiblingIndex = siblingIds.indexOf(message.id);
+      const branchItems = siblingIds.map((id, index) => {
+        const sibling = tree[id];
+        return {
+          id,
+          index: index + 1,
+          role: sibling.role,
+          active: id === message.id,
+        };
+      });
+
+      return {
+        id: message.id,
+        pathIndex,
+        role: message.role,
+        preview:
+          getMessageTextContent(message).slice(0, PREVIEW_LENGTH) ||
+          Locale.Chat.Navigator.EmptyMessage,
+        isViewportActive:
+          props.messages[props.currentIndex ?? -1]?.id === message.id,
+        branchItems,
+        activeSiblingIndex:
+          activeSiblingIndex >= 0 ? activeSiblingIndex + 1 : 1,
+      };
+    });
+  }, [props.currentIndex, props.messages, props.treeSession]);
+
+  const graphData = (() => {
+    const session = props.treeSession;
+    const tree = session?.messageTree;
+    if (!session || !tree) return null;
+
+    const rootIds = (session.rootMessageIds ?? []).filter((id) => tree[id]);
+    const activeIds = new Set(session.messages.map((message) => message.id));
+    const nodeRadius = 4.5;
+    const rowGap = 24;
+    const colGap = 20;
+    const marginX = 24;
+    const marginY = 24;
+    const forestGap = colGap;
+
+    const graphOrder = new Map<string, number>();
+    const orderedIds: string[] = [];
+    const orderVisited = new Set<string>();
+    const assignOrder = (messageId: string) => {
+      if (orderVisited.has(messageId) || !tree[messageId]) return;
+
+      orderVisited.add(messageId);
+      graphOrder.set(messageId, orderedIds.length + 1);
+      orderedIds.push(messageId);
+
+      (tree[messageId].childrenIds ?? [])
+        .filter((id) => tree[id])
+        .forEach(assignOrder);
+    };
+    rootIds.forEach(assignOrder);
+
+    const rawPositions = new Map<string, { x: number; depth: number }>();
+    const layoutStack = new Set<string>();
+    let nextLeafX = 0;
+    let maxDepth = 0;
+
+    const layoutNode = (messageId: string, depth: number): number => {
+      const node = tree[messageId];
+      if (!node) return nextLeafX;
+      if (rawPositions.has(messageId)) {
+        return rawPositions.get(messageId)!.x;
+      }
+      if (layoutStack.has(messageId)) {
+        return nextLeafX;
+      }
+
+      layoutStack.add(messageId);
+      maxDepth = Math.max(maxDepth, depth);
+
+      const childIds = (node.childrenIds ?? []).filter((id) => tree[id]);
+      let x = nextLeafX;
+
+      if (childIds.length === 0) {
+        x = nextLeafX;
+        nextLeafX += colGap;
+      } else {
+        const childXs = childIds.map((childId) =>
+          layoutNode(childId, depth + 1),
+        );
+        x = (childXs[0] + childXs[childXs.length - 1]) / 2;
+      }
+
+      rawPositions.set(messageId, { x, depth });
+      layoutStack.delete(messageId);
+      return x;
+    };
+
+    rootIds.forEach((rootId, index) => {
+      layoutNode(rootId, 0);
+      if (index < rootIds.length - 1) {
+        nextLeafX += forestGap;
+      }
+    });
+
+    const rawXs = [...rawPositions.values()].map((position) => position.x);
+    const minX = Math.min(...rawXs, 0);
+    const maxX = Math.max(...rawXs, 0);
+    const offsetX = marginX + nodeRadius - minX;
+
+    const nodeById = new Map<
+      string,
+      {
+        id: string;
+        x: number;
+        y: number;
+        active: boolean;
+        role: string;
+        label: string;
+        order: number;
+      }
+    >();
+
+    rawPositions.forEach((position, id) => {
+      const node = tree[id];
+      const preview =
+        getMessageTextContent(node).slice(0, PREVIEW_LENGTH) ||
+        Locale.Chat.Navigator.EmptyMessage;
+
+      nodeById.set(id, {
+        id,
+        x: position.x + offsetX,
+        y: marginY + nodeRadius + position.depth * rowGap,
+        active: activeIds.has(id),
+        role: node.role,
+        label: `${
+          node.role === "user"
+            ? Locale.Chat.Navigator.User
+            : Locale.Chat.Navigator.Assistant
+        }: ${preview}`,
+        order: graphOrder.get(id) ?? 0,
+      });
+    });
+
+    const edges: Array<{
+      from: { x: number; y: number; active: boolean };
+      to: { x: number; y: number; active: boolean };
+    }> = [];
+
+    Object.values(tree).forEach((node) => {
+      const from = nodeById.get(node.id);
+      if (!from) return;
+      (node.childrenIds ?? [])
+        .filter((id) => nodeById.has(id))
+        .forEach((childId) => {
+          const to = nodeById.get(childId)!;
+          edges.push({ from, to });
+        });
+    });
+
+    const nodes = orderedIds
+      .map((id) => nodeById.get(id))
+      .filter((node): node is NonNullable<typeof node> => !!node);
+
+    const width = Math.max(marginX * 2 + (maxX - minX) + nodeRadius * 2, 120);
+    const height = Math.max(
+      marginY * 2 + maxDepth * rowGap + nodeRadius * 2,
+      120,
+    );
+
+    return {
+      nodes,
+      edges,
+      width,
+      height,
+      nodeRadius,
+    };
+  })();
+
+  const activateTreeNode = (messageId: string) => {
+    const activeIndex = activePathIndexById.get(messageId);
+    if (activeIndex !== undefined) {
+      props.onJumpTo(activeIndex);
+      return;
+    }
+    props.onActivateTreeNode?.(messageId);
+  };
+
   // 当 hover 面板时，滚动到当前高亮项
   const scrollToActiveItem = useCallback(() => {
     if (activeItemRef.current && listRef.current) {
@@ -2384,28 +2705,225 @@ function ChatNavigator(props: {
         props.inPanel && styles["chat-navigator-in-panel"],
         shouldKeepOpen && styles["chat-navigator-active"],
       )}
-      onMouseEnter={scrollToActiveItem}
+      onMouseEnter={() => {
+        openNavigator();
+        scrollToActiveItem();
+      }}
+      onMouseLeave={scheduleCloseNavigator}
+      onClick={(e) => e.stopPropagation()}
     >
-      <div className={styles["chat-navigator-toggle"]}>
+      <button
+        type="button"
+        className={styles["chat-navigator-toggle"]}
+        onClick={() => {
+          if (shouldKeepOpen) {
+            closeNavigator();
+          } else {
+            openNavigator();
+          }
+        }}
+        aria-label={Locale.Chat.Navigator.Toggle}
+      >
         <ConfigIcon />
-      </div>
+      </button>
       <div className={styles["chat-navigator-panel"]}>
         <div className={styles["chat-navigator-header"]}>
           <span className={styles["chat-navigator-title"]}>
             {Locale.Chat.Navigator.Title}
           </span>
-          <input
-            type="text"
-            placeholder={Locale.Chat.Navigator.Search}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setIsSearchFocused(true)}
-            onBlur={() => setIsSearchFocused(false)}
-            className={styles["chat-navigator-search-input"]}
-          />
+          {effectiveViewMode === "list" ? (
+            <input
+              type="text"
+              placeholder={Locale.Chat.Navigator.Search}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setIsSearchFocused(false)}
+              className={styles["chat-navigator-search-input"]}
+            />
+          ) : null}
+          <button
+            type="button"
+            className={styles["chat-navigator-close"]}
+            onClick={closeNavigator}
+            aria-label={Locale.Chat.Navigator.Close}
+          >
+            <CloseIcon />
+          </button>
         </div>
+        {canShowStructure && (
+          <div className={styles["chat-navigator-tabs"]}>
+            <button
+              type="button"
+              className={clsx(
+                styles["chat-navigator-tab"],
+                effectiveViewMode === "list" &&
+                  styles["chat-navigator-tab-active"],
+              )}
+              onClick={() => setNavigatorViewMode("list")}
+            >
+              {Locale.Chat.Navigator.List}
+            </button>
+            <button
+              type="button"
+              className={clsx(
+                styles["chat-navigator-tab"],
+                effectiveViewMode === "structure" &&
+                  styles["chat-navigator-tab-active"],
+              )}
+              onClick={() => setNavigatorViewMode("structure")}
+            >
+              {Locale.Chat.Navigator.Structure}
+            </button>
+            <button
+              type="button"
+              className={clsx(
+                styles["chat-navigator-tab"],
+                effectiveViewMode === "graph" &&
+                  styles["chat-navigator-tab-active"],
+              )}
+              onClick={() => setNavigatorViewMode("graph")}
+            >
+              {Locale.Chat.Navigator.Graph}
+            </button>
+          </div>
+        )}
         <div className={styles["chat-navigator-list"]} ref={listRef}>
-          {displayMessages.length === 0 ? (
+          {effectiveViewMode === "graph" ? (
+            !graphData ? (
+              <div className={styles["chat-navigator-empty"]}>
+                {Locale.Chat.Navigator.StructureEmpty}
+              </div>
+            ) : (
+              <div className={styles["chat-graph-map"]}>
+                <svg
+                  viewBox={`0 0 ${graphData.width} ${graphData.height}`}
+                  className={styles["chat-graph-svg"]}
+                >
+                  {graphData.edges.map((edge, index) => (
+                    <line
+                      key={`edge-${index}`}
+                      x1={edge.from.x}
+                      y1={edge.from.y}
+                      x2={edge.to.x}
+                      y2={edge.to.y}
+                      className={clsx(
+                        styles["chat-graph-edge"],
+                        edge.from.active &&
+                          edge.to.active &&
+                          styles["chat-graph-edge-active"],
+                      )}
+                    />
+                  ))}
+                  {graphData.nodes.map((node) => (
+                    <g
+                      key={node.id}
+                      transform={`translate(${node.x}, ${node.y})`}
+                      className={styles["chat-graph-node-group"]}
+                      onClick={() => activateTreeNode(node.id)}
+                    >
+                      <title>{node.label}</title>
+                      <circle
+                        r={graphData.nodeRadius}
+                        className={clsx(
+                          styles["chat-graph-node"],
+                          node.role === "user"
+                            ? styles["chat-graph-node-user"]
+                            : styles["chat-graph-node-assistant"],
+                          node.active &&
+                            (node.role === "user"
+                              ? styles["chat-graph-node-user-active"]
+                              : styles["chat-graph-node-assistant-active"]),
+                        )}
+                      />
+                      <text
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        className={clsx(
+                          styles["chat-graph-node-text"],
+                          node.active && styles["chat-graph-node-text-active"],
+                        )}
+                      >
+                        {node.order}
+                      </text>
+                    </g>
+                  ))}
+                </svg>
+              </div>
+            )
+          ) : effectiveViewMode === "structure" ? (
+            structureRows.length === 0 ? (
+              <div className={styles["chat-navigator-empty"]}>
+                {Locale.Chat.Navigator.StructureEmpty}
+              </div>
+            ) : (
+              <div className={styles["chat-structure-map"]}>
+                {structureRows.map((row) => (
+                  <div
+                    key={row.id}
+                    className={clsx(
+                      styles["chat-structure-row"],
+                      row.isViewportActive &&
+                        styles["chat-structure-row-active"],
+                    )}
+                    onClick={() => activateTreeNode(row.id)}
+                  >
+                    <div className={styles["chat-structure-rail"]}>
+                      <span
+                        className={clsx(
+                          styles["chat-structure-dot"],
+                          row.role === "user"
+                            ? styles["chat-structure-dot-user"]
+                            : styles["chat-structure-dot-assistant"],
+                        )}
+                      />
+                    </div>
+                    <div className={styles["chat-structure-content"]}>
+                      <div className={styles["chat-structure-title"]}>
+                        <span className={styles["chat-structure-role"]}>
+                          {row.role === "user"
+                            ? Locale.Chat.Navigator.User
+                            : Locale.Chat.Navigator.Assistant}
+                        </span>
+                        <span className={styles["chat-structure-index"]}>
+                          #{row.pathIndex + 1}
+                        </span>
+                        {row.branchItems.length > 1 && (
+                          <span className={styles["chat-structure-branch"]}>
+                            {row.activeSiblingIndex}/{row.branchItems.length}
+                          </span>
+                        )}
+                      </div>
+                      <div className={styles["chat-structure-preview"]}>
+                        {row.preview}
+                      </div>
+                      {row.branchItems.length > 1 && (
+                        <div className={styles["chat-structure-branches"]}>
+                          {row.branchItems.map((branch) => (
+                            <button
+                              type="button"
+                              key={branch.id}
+                              className={clsx(
+                                styles["chat-structure-branch-item"],
+                                branch.active &&
+                                  styles["chat-structure-branch-item-active"],
+                              )}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                activateTreeNode(branch.id);
+                              }}
+                            >
+                              {branch.index}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : displayMessages.length === 0 ? (
             <div className={styles["chat-navigator-empty"]}>
               {searchQuery.trim()
                 ? Locale.Chat.Navigator.NoResults
@@ -2428,7 +2946,7 @@ function ChatNavigator(props: {
                     {item.role === "user" ? "👨" : "💡"}
                   </div>
                   <div className={styles["chat-navigator-item-preview"]}>
-                    {item.preview || "(空消息)"}
+                    {item.preview || Locale.Chat.Navigator.EmptyMessage}
                   </div>
                 </div>
               );
@@ -3254,10 +3772,9 @@ function ChatComponent() {
   };
 
   const deleteMessage = (msgId?: string) => {
-    chatStore.updateTargetSession(
-      session,
-      (session) =>
-        (session.messages = session.messages.filter((m) => m.id !== msgId)),
+    if (!msgId) return;
+    chatStore.updateTargetSession(session, (session) =>
+      removeMessageFromTree(session, msgId),
     );
   };
 
@@ -3334,9 +3851,109 @@ function ChatComponent() {
       });
     }
 
-    // delete the original messages
-    deleteMessage(userMessage.id);
-    deleteMessage(botMessage?.id);
+    const branchParentId = userMessage.parentId ?? null;
+
+    if (!isDualMode && message.role === "assistant") {
+      const newBotMessage = createMessage({
+        role: "assistant",
+        streaming: true,
+        model: session.mask.modelConfig.model,
+        providerName: session.mask.modelConfig.providerName,
+        modelSource: "primary",
+      });
+
+      chatStore.updateTargetSession(session, (session) => {
+        activateMessagePath(session, userMessage!.id, { truncate: true });
+        appendMessagesToActivePath(session, [newBotMessage]);
+      });
+
+      const api = getClientApi(session.mask.modelConfig.providerName);
+      const quotedUserContent = (() => {
+        if (!userMessage.quote) return userMessage.content;
+        const quotePrefix =
+          userMessage.quote.text
+            .split("\n")
+            .map((line) => `> ${line}`)
+            .join("\n") + "\n\n";
+
+        if (typeof userMessage.content === "string") {
+          return quotePrefix + userMessage.content;
+        }
+
+        let textMerged = false;
+        const content = userMessage.content.map((item) => {
+          if (item.type !== "text" || textMerged) return item;
+          textMerged = true;
+          return {
+            ...item,
+            text: quotePrefix + (item.text ?? ""),
+          };
+        });
+        return textMerged
+          ? content
+          : [{ type: "text" as const, text: quotePrefix }, ...content];
+      })();
+      const sendMessages = chatStore
+        .getMessagesWithMemory()
+        .slice(0, -2)
+        .concat({
+          ...userMessage,
+          content: quotedUserContent,
+        });
+
+      api.llm.chat({
+        messages: sendMessages,
+        config: {
+          ...session.mask.modelConfig,
+          stream: true,
+        },
+        onUpdate(content) {
+          newBotMessage.streaming = true;
+          if (content) {
+            newBotMessage.content = content;
+          }
+          chatStore.updateTargetSession(session, (session) => {
+            session.messages = session.messages.concat();
+          });
+        },
+        onFinish(message) {
+          newBotMessage.streaming = false;
+          if (message) {
+            newBotMessage.content =
+              typeof message === "string" ? message : message.content;
+          }
+          newBotMessage.date = new Date().toLocaleString();
+          chatStore.updateTargetSession(session, (session) => {
+            session.messages = session.messages.concat();
+          });
+          ChatControllerPool.remove(session.id, newBotMessage.id);
+          setIsLoading(false);
+        },
+        onError(error) {
+          newBotMessage.content +=
+            "\n\n" +
+            prettyObject({
+              error: true,
+              message: error.message,
+            });
+          newBotMessage.streaming = false;
+          newBotMessage.isError = true;
+          chatStore.updateTargetSession(session, (session) => {
+            session.messages = session.messages.concat();
+          });
+          ChatControllerPool.remove(session.id, newBotMessage.id);
+          setIsLoading(false);
+        },
+        onController(controller) {
+          ChatControllerPool.addController(
+            session.id,
+            newBotMessage.id,
+            controller,
+          );
+        },
+      });
+      return;
+    }
 
     // 在双模型模式下，只重试主模型
     if (isDualMode) {
@@ -3344,6 +3961,8 @@ function ChatComponent() {
       const newUserMessage = createMessage({
         role: "user",
         content: userMessage.content,
+        isContinuePrompt: userMessage.isContinuePrompt,
+        quote: userMessage.quote,
         modelSource: "primary",
       });
       const newBotMessage = createMessage({
@@ -3356,10 +3975,8 @@ function ChatComponent() {
 
       // 添加到主模型消息队列
       chatStore.updateTargetSession(session, (session) => {
-        session.messages = session.messages.concat([
-          newUserMessage,
-          newBotMessage,
-        ]);
+        activateMessagePath(session, branchParentId, { truncate: true });
+        appendMessagesToActivePath(session, [newUserMessage, newBotMessage]);
       });
 
       // 发送请求到主模型
@@ -3425,7 +4042,14 @@ function ChatComponent() {
     const images = getMessageImages(userMessage);
     // 将图片和文件附件传递给 onUserInput
     chatStore
-      .onUserInput(textContent, images, userAttachFiles)
+      .onUserInput(
+        textContent,
+        images,
+        userAttachFiles,
+        userMessage.isContinuePrompt,
+        userMessage.quote,
+        branchParentId,
+      )
       .then(() => setIsLoading(false));
     inputRef.current?.focus();
   };
@@ -3857,6 +4481,8 @@ function ChatComponent() {
     startIndex: number;
     endIndex: number;
   } | null>(null);
+  const [navigatorViewMode, setNavigatorViewMode] =
+    useState<ChatNavigatorViewMode>("list");
 
   // 跳转到引用的消息并高亮具体文本
   const scrollToQuotedMessage = useCallback(
@@ -4870,6 +5496,50 @@ function ChatComponent() {
     );
   };
 
+  const getAssistantBranchTarget = (message: ChatMessage) => {
+    if (message.role !== "assistant") return null;
+
+    const assistantBranchInfo = getMessageBranchInfo(session, message.id);
+    if (assistantBranchInfo) {
+      return {
+        targetId: message.id,
+        branchInfo: assistantBranchInfo,
+      };
+    }
+
+    if (!message.parentId) return null;
+    const userBranchInfo = getMessageBranchInfo(session, message.parentId);
+    if (!userBranchInfo) return null;
+
+    return {
+      targetId: message.parentId,
+      branchInfo: userBranchInfo,
+    };
+  };
+
+  const renderAssistantBranchSwitcher = (message: ChatMessage) => {
+    const branchTarget = getAssistantBranchTarget(message);
+    if (!branchTarget) return null;
+
+    return (
+      <MessageBranchSwitcher
+        branchInfo={branchTarget.branchInfo}
+        onSwitch={(delta) =>
+          chatStore.switchMessageBranch(branchTarget.targetId, delta)
+        }
+      />
+    );
+  };
+
+  const activateTreeNodePath = useCallback(
+    (messageId: string) => {
+      chatStore.updateTargetSession(session, (session) => {
+        activateMessagePath(session, messageId);
+      });
+    },
+    [chatStore, session],
+  );
+
   const enableParamOverride =
     session.mask.modelConfig.enableParamOverride || false;
   const paramOverrideContent =
@@ -5004,6 +5674,10 @@ function ChatComponent() {
             config={config}
             onPrimaryModelSelect={() => setShowPrimaryModelSelector(true)}
             onSecondaryModelSelect={() => setShowSecondaryModelSelector(true)}
+            treeSession={session}
+            onActivateTreeNode={activateTreeNodePath}
+            navigatorViewMode={navigatorViewMode}
+            onNavigatorViewModeChange={setNavigatorViewMode}
             onScrollBothToBottom={(fn) => {
               dualModelScrollToBottomRef.current = fn;
             }}
@@ -5152,7 +5826,12 @@ function ChatComponent() {
                         )}
                         {/* 消息操作按钮 */}
                         {showActions && (
-                          <div className={styles["chat-message-actions"]}>
+                          <div
+                            className={clsx(
+                              styles["chat-message-actions"],
+                              !isUser && styles["chat-message-actions-visible"],
+                            )}
+                          >
                             <div className={styles["message-actions-row"]}>
                               {message.streaming ? (
                                 <ChatAction
@@ -5329,7 +6008,12 @@ function ChatComponent() {
                       </div>
                       {/* 底部功能图标组 */}
                       {showActions && (
-                        <div className={styles["chat-message-actions"]}>
+                        <div
+                          className={clsx(
+                            styles["chat-message-actions"],
+                            !isUser && styles["chat-message-actions-visible"],
+                          )}
+                        >
                           <div className={styles["message-actions-row"]}>
                             {message.streaming ? (
                               <ChatAction
@@ -5339,6 +6023,8 @@ function ChatComponent() {
                               />
                             ) : (
                               <>
+                                {!isSecondary &&
+                                  renderAssistantBranchSwitcher(message)}
                                 <ChatAction
                                   text={Locale.Chat.Actions.Retry}
                                   icon={<ResetIcon />}
@@ -5582,8 +6268,15 @@ function ChatComponent() {
                         )}
 
                         {iconUpEnabled && showActions && (
-                          <div className={styles["chat-message-actions"]}>
+                          <div
+                            className={clsx(
+                              styles["chat-message-actions"],
+                              !isUser && styles["chat-message-actions-visible"],
+                            )}
+                          >
                             <div className={styles["message-actions-row"]}>
+                              {!iconDownEnabled &&
+                                renderAssistantBranchSwitcher(message)}
                               <ChatInputActions
                                 message={message}
                                 onUserStop={onUserStop}
@@ -5764,8 +6457,14 @@ function ChatComponent() {
                           : formatMessage(message)}
                       </div>
                       {iconDownEnabled && showActions && (
-                        <div className={styles["chat-message-actions"]}>
+                        <div
+                          className={clsx(
+                            styles["chat-message-actions"],
+                            !isUser && styles["chat-message-actions-visible"],
+                          )}
+                        >
                           <div className={styles["message-actions-row"]}>
+                            {renderAssistantBranchSwitcher(message)}
                             <ChatInputActions
                               message={message}
                               onUserStop={onUserStop}
@@ -5809,6 +6508,9 @@ function ChatComponent() {
         {!isDualMode && (
           <ChatNavigator
             messages={messages}
+            treeSession={session}
+            viewMode={navigatorViewMode}
+            onViewModeChange={setNavigatorViewMode}
             currentIndex={
               // 计算当前可视范围中心的消息，如果是 assistant 则归属到其对应的 user
               visibleRange
@@ -5834,6 +6536,25 @@ function ChatComponent() {
               });
               setHighlightIndex(index);
               setTimeout(() => setHighlightIndex(null), 3000);
+            }}
+            onActivateTreeNode={(messageId) => {
+              activateTreeNodePath(messageId);
+              requestAnimationFrame(() => {
+                const nextSession = chatStore.currentSession();
+                const messageIndex = nextSession.messages.findIndex(
+                  (message) => message.id === messageId,
+                );
+                if (messageIndex < 0) return;
+
+                const renderIndex = context.length + messageIndex;
+                virtuosoRef.current?.scrollToIndex({
+                  index: renderIndex,
+                  align: "center",
+                  behavior: "auto",
+                });
+                setHighlightIndex(renderIndex);
+                setTimeout(() => setHighlightIndex(null), 3000);
+              });
             }}
           />
         )}
