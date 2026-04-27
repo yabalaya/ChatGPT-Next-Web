@@ -80,6 +80,7 @@ import {
   activateMessagePath,
   appendMessagesToActivePath,
   getMessageBranchInfo,
+  removeMessageFromTree,
   rebuildMessageTreeFromMessages,
 } from "../store";
 
@@ -99,6 +100,7 @@ import {
   countTokens,
   saveModelConfig,
   extractMarkdownFromSelection,
+  readFileContent,
 } from "../utils";
 import { estimateTokenLengthInLLM } from "@/app/utils/token";
 
@@ -183,6 +185,54 @@ function appendRetryInstruction(content: string, instruction: string) {
   return trimmedContent
     ? `${trimmedContent}\n\n${prefix}:\n${trimmedInstruction}`
     : `${prefix}:\n${trimmedInstruction}`;
+}
+
+async function buildRetryRequestContent(
+  userMessage: ChatMessage,
+  attachFiles: UploadFile[],
+) {
+  const textContent = getMessageTextContent(userMessage);
+  let textForAI = textContent;
+
+  if (userMessage.quote) {
+    const quotedText = userMessage.quote.text
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n");
+    textForAI = `${quotedText}\n\n${textContent}`;
+  }
+
+  const images = getMessageImages(userMessage);
+  const hasAttachments = attachFiles.length > 0 || images.length > 0;
+  if (!hasAttachments) {
+    return textForAI;
+  }
+
+  let fileHeaderText = "";
+  for (const file of attachFiles) {
+    const curFileContent = await readFileContent(file);
+    if (curFileContent) {
+      fileHeaderText += `[file name]: ${file.name}\n`;
+      fileHeaderText += `[file content begin]\n`;
+      fileHeaderText += curFileContent;
+      fileHeaderText += `\n[file content end]\n`;
+    }
+  }
+
+  const contentParts: MultimodalContent[] = [
+    { type: "text", text: fileHeaderText + textForAI },
+  ];
+
+  if (images.length > 0) {
+    contentParts.push(
+      ...images.map((url) => ({
+        type: "image_url" as const,
+        image_url: { url },
+      })),
+    );
+  }
+
+  return contentParts;
 }
 
 const Markdown = dynamic(async () => (await import("./markdown")).Markdown, {
@@ -1936,6 +1986,7 @@ function ChatInputActions(props: {
   config: any;
   i: number;
   hideRemovalActions?: boolean;
+  showDeleteAction?: boolean;
   treeMode?: boolean;
 }) {
   const {
@@ -1952,6 +2003,7 @@ function ChatInputActions(props: {
     config,
     i,
     hideRemovalActions,
+    showDeleteAction,
     treeMode,
   } = props;
 
@@ -1971,7 +2023,7 @@ function ChatInputActions(props: {
             onResend={onResend}
           />
 
-          {!hideRemovalActions && (
+          {(!hideRemovalActions || showDeleteAction) && (
             <ChatAction
               text={Locale.Chat.Actions.Delete}
               icon={<DeleteIcon />}
@@ -3923,11 +3975,22 @@ function ChatComponent() {
     }
   };
 
-  const deleteMessage = (msgId?: string) => {
+  const deleteMessage = async (msgId?: string) => {
     if (!msgId) return;
-    chatStore.updateTargetSession(session, (session) => {
-      if (session.enableMessageTree) return;
 
+    if (session.enableMessageTree) {
+      const confirmed = await showConfirm(
+        Locale.Chat.MessageTree.DeleteNodeConfirm,
+      );
+      if (!confirmed) return;
+
+      chatStore.updateTargetSession(session, (session) => {
+        removeMessageFromTree(session, msgId);
+      });
+      return;
+    }
+
+    chatStore.updateTargetSession(session, (session) => {
       session.messages = session.messages.filter(
         (message) => message.id !== msgId,
       );
@@ -4075,6 +4138,11 @@ function ChatComponent() {
       return;
     }
 
+    const retryRequestContent = await buildRetryRequestContent(
+      userMessage,
+      userAttachFiles,
+    );
+
     const newBotMessage = createMessage({
       role: "assistant",
       streaming: true,
@@ -4099,42 +4167,30 @@ function ChatComponent() {
         newBotMessage.turnId = currentUserMessage.turnId;
       }
       activateMessagePath(session, userMessage!.id, { truncate: true });
+    });
+
+    const memoryMessages = chatStore.getMessagesWithMemory();
+    const retryMessageInMemory = memoryMessages.some(
+      (message) => message.id === userMessage!.id,
+    );
+    const sendMessages = (
+      retryMessageInMemory
+        ? memoryMessages.map((message) =>
+            message.id === userMessage!.id
+              ? { ...message, content: retryRequestContent }
+              : message,
+          )
+        : memoryMessages.concat({
+            ...userMessage,
+            content: retryRequestContent,
+          })
+    ) as ChatMessage[];
+
+    chatStore.updateTargetSession(session, (session) => {
       appendMessagesToActivePath(session, [newBotMessage]);
     });
 
     const api = getClientApi(session.mask.modelConfig.providerName);
-    const quotedUserContent = (() => {
-      if (!userMessage.quote) return userMessage.content;
-      const quotePrefix =
-        userMessage.quote.text
-          .split("\n")
-          .map((line) => `> ${line}`)
-          .join("\n") + "\n\n";
-
-      if (typeof userMessage.content === "string") {
-        return quotePrefix + userMessage.content;
-      }
-
-      let textMerged = false;
-      const content = userMessage.content.map((item) => {
-        if (item.type !== "text" || textMerged) return item;
-        textMerged = true;
-        return {
-          ...item,
-          text: quotePrefix + (item.text ?? ""),
-        };
-      });
-      return textMerged
-        ? content
-        : [{ type: "text" as const, text: quotePrefix }, ...content];
-    })();
-    const sendMessages = chatStore
-      .getMessagesWithMemory()
-      .slice(0, -2)
-      .concat({
-        ...userMessage,
-        content: quotedUserContent,
-      });
 
     api.llm.chat({
       messages: sendMessages,
@@ -4156,14 +4212,33 @@ function ChatComponent() {
         if (message) {
           newBotMessage.content =
             typeof message === "string" ? message : message.content;
+          if (typeof message !== "string") {
+            if (!newBotMessage.statistic) {
+              newBotMessage.statistic = {};
+            }
+            newBotMessage.isStreamRequest = !!message?.is_stream_request;
+            newBotMessage.statistic.completionTokens =
+              message?.usage?.completion_tokens;
+            newBotMessage.statistic.firstReplyLatency =
+              message?.usage?.first_content_latency;
+            newBotMessage.statistic.totalReplyLatency =
+              message?.usage?.total_latency;
+            newBotMessage.statistic.reasoningLatency =
+              message?.usage?.thinking_time;
+            newBotMessage.statistic.searchingLatency =
+              message?.usage?.searching_time;
+          }
+          newBotMessage.date = new Date().toLocaleString();
+          chatStore.onNewMessage(newBotMessage, session);
+        } else {
+          chatStore.updateTargetSession(session, (session) => {
+            session.messages = session.messages.concat();
+          });
         }
-        newBotMessage.date = new Date().toLocaleString();
-        chatStore.updateTargetSession(session, (session) => {
-          session.messages = session.messages.concat();
-        });
         ChatControllerPool.remove(session.id, newBotMessage.id);
       },
       onError(error) {
+        const isAborted = error.message?.includes?.("aborted");
         newBotMessage.content +=
           "\n\n" +
           prettyObject({
@@ -4171,7 +4246,7 @@ function ChatComponent() {
             message: error.message,
           });
         newBotMessage.streaming = false;
-        newBotMessage.isError = true;
+        newBotMessage.isError = !isAborted;
         chatStore.updateTargetSession(session, (session) => {
           session.messages = session.messages.concat();
         });
@@ -5634,8 +5709,19 @@ function ChatComponent() {
     );
   };
 
-  const getAssistantBranchTarget = (message: ChatMessage) => {
+  const getMessageBranchTarget = (message: ChatMessage) => {
     if (!treeConversationEnabled) return null;
+
+    if (message.role === "user") {
+      const userBranchInfo = getMessageBranchInfo(session, message.id);
+      if (!userBranchInfo) return null;
+
+      return {
+        targetId: message.id,
+        branchInfo: userBranchInfo,
+      };
+    }
+
     if (message.role !== "assistant") return null;
 
     const assistantBranchInfo = getMessageBranchInfo(session, message.id);
@@ -5656,8 +5742,10 @@ function ChatComponent() {
     };
   };
 
-  const renderAssistantBranchSwitcher = (message: ChatMessage) => {
-    const branchTarget = getAssistantBranchTarget(message);
+  const renderMessageBranchSwitcher = (
+    message: ChatMessage,
+    branchTarget = getMessageBranchTarget(message),
+  ) => {
     if (!branchTarget) return null;
 
     return (
@@ -6196,7 +6284,7 @@ function ChatComponent() {
                             ) : (
                               <>
                                 {!isSecondary &&
-                                  renderAssistantBranchSwitcher(message)}
+                                  renderMessageBranchSwitcher(message)}
                                 <ChatRetryAction
                                   message={message}
                                   treeMode={
@@ -6304,6 +6392,9 @@ function ChatComponent() {
                 !isContext;
 
               const showTyping = message.preview || message.streaming;
+              const messageBranchTarget = getMessageBranchTarget(message);
+              const persistentUserBranchSwitcher =
+                treeConversationEnabled && isUser && !!messageBranchTarget;
 
               const shouldShowClearContextDivider =
                 !treeConversationEnabled &&
@@ -6444,35 +6535,43 @@ function ChatComponent() {
                           </div>
                         )}
 
-                        {iconUpEnabled && showActions && (
-                          <div
-                            className={clsx(
-                              styles["chat-message-actions"],
-                              !isUser && styles["chat-message-actions-visible"],
-                            )}
-                          >
-                            <div className={styles["message-actions-row"]}>
-                              {!iconDownEnabled &&
-                                renderAssistantBranchSwitcher(message)}
-                              <ChatInputActions
-                                message={message}
-                                onUserStop={onUserStop}
-                                onResend={onResend}
-                                onDelete={onDelete}
-                                onBreak={onBreak}
-                                onPinMessage={onPinMessage}
-                                copyToClipboard={copyToClipboard}
-                                openaiSpeech={openaiSpeech}
-                                setUserInput={setUserInput}
-                                speechStatus={speechStatus}
-                                config={config}
-                                i={i}
-                                hideRemovalActions={treeConversationEnabled}
-                                treeMode={treeConversationEnabled}
-                              />
+                        {iconUpEnabled &&
+                          (showActions || persistentUserBranchSwitcher) && (
+                            <div
+                              className={clsx(
+                                styles["chat-message-actions"],
+                                (!isUser || persistentUserBranchSwitcher) &&
+                                  styles["chat-message-actions-visible"],
+                              )}
+                            >
+                              <div className={styles["message-actions-row"]}>
+                                {!iconDownEnabled &&
+                                  renderMessageBranchSwitcher(
+                                    message,
+                                    messageBranchTarget,
+                                  )}
+                                {showActions && (
+                                  <ChatInputActions
+                                    message={message}
+                                    onUserStop={onUserStop}
+                                    onResend={onResend}
+                                    onDelete={onDelete}
+                                    onBreak={onBreak}
+                                    onPinMessage={onPinMessage}
+                                    copyToClipboard={copyToClipboard}
+                                    openaiSpeech={openaiSpeech}
+                                    setUserInput={setUserInput}
+                                    speechStatus={speechStatus}
+                                    config={config}
+                                    i={i}
+                                    hideRemovalActions={treeConversationEnabled}
+                                    showDeleteAction={treeConversationEnabled}
+                                    treeMode={treeConversationEnabled}
+                                  />
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
                       </div>
                       {showTyping && (
                         <div className={styles["chat-message-status"]}>
@@ -6635,34 +6734,42 @@ function ChatComponent() {
                           ? Locale.Chat.IsContext
                           : formatMessage(message)}
                       </div>
-                      {iconDownEnabled && showActions && (
-                        <div
-                          className={clsx(
-                            styles["chat-message-actions"],
-                            !isUser && styles["chat-message-actions-visible"],
-                          )}
-                        >
-                          <div className={styles["message-actions-row"]}>
-                            {renderAssistantBranchSwitcher(message)}
-                            <ChatInputActions
-                              message={message}
-                              onUserStop={onUserStop}
-                              onResend={onResend}
-                              onDelete={onDelete}
-                              onBreak={onBreak}
-                              onPinMessage={onPinMessage}
-                              copyToClipboard={copyToClipboard}
-                              openaiSpeech={openaiSpeech}
-                              setUserInput={setUserInput}
-                              speechStatus={speechStatus}
-                              config={config}
-                              i={i}
-                              hideRemovalActions={treeConversationEnabled}
-                              treeMode={treeConversationEnabled}
-                            />
+                      {iconDownEnabled &&
+                        (showActions || persistentUserBranchSwitcher) && (
+                          <div
+                            className={clsx(
+                              styles["chat-message-actions"],
+                              (!isUser || persistentUserBranchSwitcher) &&
+                                styles["chat-message-actions-visible"],
+                            )}
+                          >
+                            <div className={styles["message-actions-row"]}>
+                              {renderMessageBranchSwitcher(
+                                message,
+                                messageBranchTarget,
+                              )}
+                              {showActions && (
+                                <ChatInputActions
+                                  message={message}
+                                  onUserStop={onUserStop}
+                                  onResend={onResend}
+                                  onDelete={onDelete}
+                                  onBreak={onBreak}
+                                  onPinMessage={onPinMessage}
+                                  copyToClipboard={copyToClipboard}
+                                  openaiSpeech={openaiSpeech}
+                                  setUserInput={setUserInput}
+                                  speechStatus={speechStatus}
+                                  config={config}
+                                  i={i}
+                                  hideRemovalActions={treeConversationEnabled}
+                                  showDeleteAction={treeConversationEnabled}
+                                  treeMode={treeConversationEnabled}
+                                />
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
                     </div>
                   </div>
                   {shouldShowClearContextDivider && (

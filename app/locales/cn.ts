@@ -295,6 +295,7 @@ const cn = {
       DisabledToast: "已关闭树形会话，仅保留激活分支，其他分支消息将被移除",
       DisableConfirm:
         "关闭树形会话后，仅保留当前激活分支，其他分支消息将被移除。确认关闭？",
+      DeleteNodeConfirm: "删除该节点后，它的后续子分支也会被移除。确认删除？",
       DualModelNotSupported: "树形会话不支持双模型模式",
     },
     Typing: "正在输入…",

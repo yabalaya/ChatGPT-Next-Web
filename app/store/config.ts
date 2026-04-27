@@ -82,8 +82,8 @@ export const DEFAULT_CONFIG = {
     frequency_penalty_enabled: false,
     reasoning_effort: "none",
     sendMemory: true,
-    historyMessageCount: 4,
-    compressMessageLengthThreshold: 1000,
+    historyMessageCount: 10,
+    compressMessageLengthThreshold: 2000,
     compressModel: "" as ModelType,
     compressProviderName: "" as ServiceProvider,
     // translateModel: "gpt-4o-mini" as ModelType,
@@ -198,7 +198,7 @@ export const useAppConfig = createPersistStore(
   }),
   {
     name: StoreKey.Config,
-    version: 4.5,
+    version: 4.6,
 
     merge(persistedState, currentState) {
       const state = persistedState as ChatConfig | undefined;
@@ -223,8 +223,8 @@ export const useAppConfig = createPersistStore(
 
       if (version < 3.4) {
         state.modelConfig.sendMemory = true;
-        state.modelConfig.historyMessageCount = 4;
-        state.modelConfig.compressMessageLengthThreshold = 1000;
+        state.modelConfig.historyMessageCount = 10;
+        state.modelConfig.compressMessageLengthThreshold = 2000;
         state.modelConfig.frequency_penalty = 0;
         state.modelConfig.top_p = 1;
         state.modelConfig.template = DEFAULT_INPUT_TEMPLATE;
@@ -288,6 +288,20 @@ export const useAppConfig = createPersistStore(
       }
       if (version < 4.5) {
         state.modelConfig.max_tokens = 8000;
+      }
+      if (version < 4.6) {
+        if (
+          state.modelConfig.historyMessageCount === undefined ||
+          state.modelConfig.historyMessageCount === 4
+        ) {
+          state.modelConfig.historyMessageCount = 10;
+        }
+        if (
+          state.modelConfig.compressMessageLengthThreshold === undefined ||
+          state.modelConfig.compressMessageLengthThreshold === 1000
+        ) {
+          state.modelConfig.compressMessageLengthThreshold = 2000;
+        }
       }
       return state as any;
     },

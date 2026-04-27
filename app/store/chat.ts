@@ -1930,7 +1930,7 @@ export const useChatStore = createPersistStore(
   },
   {
     name: StoreKey.Chat,
-    version: 3.7,
+    version: 3.8,
     migrate(persistedState, version) {
       const state = persistedState as any;
       const newState = JSON.parse(
@@ -1946,8 +1946,8 @@ export const useChatStore = createPersistStore(
           newSession.topic = oldSession.topic;
           newSession.messages = [...oldSession.messages];
           newSession.mask.modelConfig.sendMemory = true;
-          newSession.mask.modelConfig.historyMessageCount = 4;
-          newSession.mask.modelConfig.compressMessageLengthThreshold = 1000;
+          newSession.mask.modelConfig.historyMessageCount = 10;
+          newSession.mask.modelConfig.compressMessageLengthThreshold = 2000;
           newState.sessions.push(newSession);
         }
       }
@@ -2028,6 +2028,22 @@ export const useChatStore = createPersistStore(
           }
           if (s.enableMessageTree) {
             s.dualModelMode = false;
+          }
+        });
+      }
+      if (version < 3.8) {
+        newState.sessions.forEach((s) => {
+          if (
+            s.mask.modelConfig.historyMessageCount === undefined ||
+            s.mask.modelConfig.historyMessageCount === 4
+          ) {
+            s.mask.modelConfig.historyMessageCount = 10;
+          }
+          if (
+            s.mask.modelConfig.compressMessageLengthThreshold === undefined ||
+            s.mask.modelConfig.compressMessageLengthThreshold === 1000
+          ) {
+            s.mask.modelConfig.compressMessageLengthThreshold = 2000;
           }
         });
       }
