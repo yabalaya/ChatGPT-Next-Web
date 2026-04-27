@@ -1,27 +1,56 @@
 <div align="center">
 <img src="./docs/images/icon.svg" alt="预览"/>
 
-<h1 align="center">NextChat</h1>
+<h1 align="center">NextraChat</h1>
 
-一键免费部署你的私人 ChatGPT 网页应用，支持 GPT3, GPT4 & Gemini Pro 模型。
+基于 ChatGPTNextWeb 的增强版本，侧重维护 OpenAI 兼容渠道、模型管理和更完整的对话工作流。
 
-[演示 Demo](https://chat-gpt-next-web.vercel.app/) / [反馈 Issues](https://github.com/Yidadaa/ChatGPT-Next-Web/issues) / [加入 Discord](https://discord.gg/zrhvHCr79N)
+[当前主文档](./README.md) / [原项目](https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FYidadaa%2FChatGPT-Next-Web&env=OPENAI_API_KEY&env=CODE&project-name=chatgpt-next-web&repository-name=ChatGPT-Next-Web)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FQAbot-zh%2FChatGPT-Next-Web&env=OPENAI_API_KEY&env=CODE&project-name=chatgpt-next-web&repository-name=ChatGPT-Next-Web)
 
 [![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/ZBUEFA)
 
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/Yidadaa/ChatGPT-Next-Web)
+[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/QAbot-zh/ChatGPT-Next-Web)
 
 ![主界面](./docs/images/cover.png)
 
 </div>
 
+## 当前增强功能速览
+
+> 这一节用于同步当前仓库的新功能；更完整的功能、环境变量和部署说明请优先查看 [README.md](./README.md)。
+
+### 对话与消息工作流
+
+- **双模型对话模式**：左右分栏同时查看主模型和副模型回复，支持独立副模型配置。
+- **树形会话 / 分支导航**：直接重试、补充要求后重试会形成分支；支持列表、结构和图形化树状导航，可在 user/assistant 消息上切换分支，并删除失败节点及其后续子树。
+- **重试增强**：支持「直接重试」和「补充要求后重试」，重试时保留引用、图片和文件附件。
+- **继续补全**：一键要求模型续写上文，可自定义继续补全提示词，并可隐藏继续补全产生的 user 消息。
+- **上下文管理**：清除上下文会显示分隔提示；默认历史消息数为 `10`，历史压缩阈值为 `2000`。
+
+### 模型、渠道与设置
+
+- **自定义 AI 提供商**：支持 OpenAI/DeepSeek/SiliconFlow 类型渠道，单渠道多密钥、余额查询、模型拉取与测试、模型别名和视觉能力配置。
+- **服务器代理**：自定义渠道可通过服务端代理请求，规避浏览器 CORS 限制，可用 `DISABLE_CUSTOM_PROXY` 禁用。
+- **模型选择器增强**：支持模型描述、标签筛选、搜索和 `@` 快捷切换。
+- **参数注入**：支持前端「参数覆盖」和服务端 `MODEL_PARAMS` 按模型注入请求参数。
+- **TTS 朗读**：支持 OpenAI TTS 与 Edge TTS，可配置模型、音色、语速和自动朗读。
+
+### 展示、工具与分享
+
+- **Artifacts 与代码块预览**：HTML、SVG、Mermaid 代码块支持预览、下载和分享；长代码块支持折叠、复制、下载和编辑。
+- **Python 在线运行**：基于 Piston 执行 Python 代码块，支持 stdin、无输出提示、危险操作检测和输出复制。
+- **Mermaid 增强**：渲染失败时显示错误详情，并提供官方文档和编辑器入口。
+- **公式与思考过程**：公式支持 LaTeX/MathML/Word HTML 复制；`<think>` / `reasoning_content` 支持折叠、计时和复制。
+- **分享与导出**：聊天记录和 Artifacts 可上传到 Cloudflare KV 生成分享链接，双模型会话支持选择导出主/副模型内容。
+- **云备份**：支持通过文件服务器进行设置、提示词、角色、自定义渠道和会话数据的同步备份。
+
 ## 开始使用
 
 1. 准备好你的 [OpenAI API Key](https://platform.openai.com/account/api-keys);
 2. 点击右侧按钮开始部署：
-   [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FYidadaa%2FChatGPT-Next-Web&env=OPENAI_API_KEY&env=CODE&env=GOOGLE_API_KEY&project-name=chatgpt-next-web&repository-name=ChatGPT-Next-Web)，直接使用 Github 账号登录即可，记得在环境变量页填入 API Key 和[页面访问密码](#配置页面访问密码) CODE；
+   [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FQAbot-zh%2FChatGPT-Next-Web&env=OPENAI_API_KEY&env=CODE&env=GOOGLE_API_KEY&project-name=chatgpt-next-web&repository-name=ChatGPT-Next-Web)，直接使用 Github 账号登录即可，记得在环境变量页填入 API Key 和[页面访问密码](#配置页面访问密码) CODE；
 3. 部署完毕后，即可开始使用；
 4. （可选）[绑定自定义域名](https://vercel.com/docs/concepts/projects/domains/add-a-domain)：Vercel 分配的域名 DNS 在某些区域被污染了，绑定自定义域名即可直连。
 
@@ -67,6 +96,7 @@ code1,code2,code3
 ## 环境变量
 
 > 本项目大多数配置项都通过环境变量来设置，教程：[如何修改 Vercel 环境变量](./docs/vercel-cn.md)。
+> 增强版完整环境变量表格与示例请优先查看 [README.md#环境变量](./README.md#环境变量)。
 
 ### `OPENAI_API_KEY` （必填项）
 
@@ -196,7 +226,7 @@ anthropic claude Api Url.
 
 点击下方按钮，开始二次开发：
 
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/Yidadaa/ChatGPT-Next-Web)
+[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/QAbot-zh/ChatGPT-Next-Web)
 
 在开始写代码之前，需要在项目根目录新建一个 `.env.local` 文件，里面填入环境变量：
 
@@ -254,7 +284,7 @@ docker run -d -p 3000:3000 \
 在控制台运行下方命令：
 
 ```shell
-bash <(curl -s https://raw.githubusercontent.com/Yidadaa/ChatGPT-Next-Web/main/scripts/setup.sh)
+bash <(curl -s https://raw.githubusercontent.com/QAbot-zh/ChatGPT-Next-Web/main/scripts/setup.sh)
 ```
 
 ⚠️ 注意：如果你安装过程中遇到了问题，请使用 docker 部署。
@@ -267,7 +297,7 @@ bash <(curl -s https://raw.githubusercontent.com/Yidadaa/ChatGPT-Next-Web/main/s
 
 ### 贡献者
 
-[见项目贡献者列表](https://github.com/Yidadaa/ChatGPT-Next-Web/graphs/contributors)
+[见项目贡献者列表](https://github.com/QAbot-zh/ChatGPT-Next-Web/graphs/contributors)
 
 ### 相关项目
 
