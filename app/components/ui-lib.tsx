@@ -30,6 +30,7 @@ import {
   getModelGroup,
   ModelGroup,
 } from "../utils/model-groups";
+import { safeLocalStorage } from "../utils";
 
 export function Popover(props: {
   children: JSX.Element;
@@ -1156,6 +1157,70 @@ type SearchSelectorItem<T> = {
   modelName?: string;
 };
 
+type SearchSelectorGroup<T> = {
+  group: ModelGroup;
+  items: Array<SearchSelectorItem<T>>;
+  count: number;
+};
+
+type SearchSelectorCollapsedGroups = Record<string, boolean>;
+
+const SEARCH_SELECTOR_COLLAPSED_GROUPS_STORAGE_KEY =
+  "search-selector-collapsed-groups";
+
+function getStoredSearchSelectorCollapsedGroups(): SearchSelectorCollapsedGroups {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const storedGroups = safeLocalStorage().getItem(
+      SEARCH_SELECTOR_COLLAPSED_GROUPS_STORAGE_KEY,
+    );
+    if (!storedGroups) {
+      return {};
+    }
+
+    const parsedGroups = JSON.parse(storedGroups);
+    if (
+      !parsedGroups ||
+      typeof parsedGroups !== "object" ||
+      Array.isArray(parsedGroups)
+    ) {
+      return {};
+    }
+
+    return Object.entries(parsedGroups).reduce<SearchSelectorCollapsedGroups>(
+      (groups, [groupId, collapsed]) => {
+        if (typeof collapsed === "boolean") {
+          groups[groupId] = collapsed;
+        }
+        return groups;
+      },
+      {},
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveSearchSelectorCollapsedGroups(
+  groups: SearchSelectorCollapsedGroups,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    safeLocalStorage().setItem(
+      SEARCH_SELECTOR_COLLAPSED_GROUPS_STORAGE_KEY,
+      JSON.stringify(groups),
+    );
+  } catch {
+    // Ignore unavailable storage.
+  }
+}
+
 function getSearchSelectorItemModelName<T>(item: SearchSelectorItem<T>) {
   if (item.modelName) {
     return item.modelName;
@@ -1183,10 +1248,23 @@ export function SearchSelector<T>(props: {
 
   // 添加搜索状态
   const [searchQuery, setSearchQuery] = useState("");
-  const [collapsedGroups, setCollapsedGroups] = useState<
-    Record<string, boolean>
-  >({});
+  const [collapsedGroups, setCollapsedGroups] =
+    useState<SearchSelectorCollapsedGroups>(
+      getStoredSearchSelectorCollapsedGroups,
+    );
+  const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
+  const [flyoutPosition, setFlyoutPosition] = useState({
+    top: 0,
+    left: 0,
+    width: 320,
+  });
   const inputRef = useRef<HTMLInputElement>(null);
+  const flyoutRef = useRef<HTMLDivElement>(null);
+  const savedCollapsedGroupsRef =
+    useRef<SearchSelectorCollapsedGroups>(collapsedGroups);
+  const flyoutCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const accessStore = useAccessStore();
 
@@ -1210,8 +1288,83 @@ export function SearchSelector<T>(props: {
   useEffect(() => {
     if (searchQuery.trim() || selectedRule) {
       setCollapsedGroups({});
+      setHoveredGroupId(null);
+    } else {
+      setCollapsedGroups(savedCollapsedGroupsRef.current);
     }
   }, [searchQuery, selectedRule]);
+
+  const updateCollapsedGroups = useCallback(
+    (
+      getNextGroups: (
+        groups: SearchSelectorCollapsedGroups,
+      ) => SearchSelectorCollapsedGroups,
+    ) => {
+      setCollapsedGroups(() => {
+        const nextGroups = getNextGroups(savedCollapsedGroupsRef.current);
+        savedCollapsedGroupsRef.current = nextGroups;
+        saveSearchSelectorCollapsedGroups(nextGroups);
+        return nextGroups;
+      });
+    },
+    [],
+  );
+
+  const clearFlyoutCloseTimer = useCallback(() => {
+    if (flyoutCloseTimerRef.current) {
+      clearTimeout(flyoutCloseTimerRef.current);
+      flyoutCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const closeGroupFlyout = useCallback(() => {
+    clearFlyoutCloseTimer();
+    setHoveredGroupId(null);
+  }, [clearFlyoutCloseTimer]);
+
+  const scheduleCloseGroupFlyout = useCallback(() => {
+    clearFlyoutCloseTimer();
+    flyoutCloseTimerRef.current = setTimeout(() => {
+      setHoveredGroupId(null);
+      flyoutCloseTimerRef.current = null;
+    }, 120);
+  }, [clearFlyoutCloseTimer]);
+
+  const openCollapsedGroupFlyout = useCallback(
+    (groupId: string, target: HTMLElement, force = false) => {
+      if (!force && !collapsedGroups[groupId]) {
+        return;
+      }
+
+      const rect = target.getBoundingClientRect();
+      const viewportPadding = 12;
+      const gap = 6;
+      const preferredLeft = rect.right + gap;
+      const minFlyoutWidth = 160;
+      const left =
+        window.innerWidth - preferredLeft - viewportPadding < minFlyoutWidth
+          ? Math.max(
+              viewportPadding,
+              window.innerWidth - minFlyoutWidth - viewportPadding,
+            )
+          : preferredLeft;
+      const availableWidth = window.innerWidth - left - viewportPadding;
+      const width = Math.max(minFlyoutWidth, Math.min(360, availableWidth));
+
+      clearFlyoutCloseTimer();
+      setFlyoutPosition({
+        top: Math.max(viewportPadding, rect.top),
+        left,
+        width,
+      });
+      setHoveredGroupId(groupId);
+    },
+    [clearFlyoutCloseTimer, collapsedGroups],
+  );
+
+  useEffect(() => {
+    return () => clearFlyoutCloseTimer();
+  }, [clearFlyoutCloseTimer]);
 
   const handleSelection = (e: MouseEvent, value: T) => {
     if (props.multiple) {
@@ -1269,10 +1422,7 @@ export function SearchSelector<T>(props: {
   );
 
   const groupedItems = useMemo(() => {
-    const groups = new Map<
-      string,
-      { group: ModelGroup; items: Array<SearchSelectorItem<T>>; count: number }
-    >();
+    const groups = new Map<string, SearchSelectorGroup<T>>();
 
     filteredItems.forEach((item) => {
       const group = getModelGroup(getSearchSelectorItemModelName(item));
@@ -1305,7 +1455,7 @@ export function SearchSelector<T>(props: {
   const toggleAllGroups = (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     const nextCollapsedState = !allGroupsCollapsed;
-    setCollapsedGroups((groups) => {
+    updateCollapsedGroups((groups) => {
       const nextGroups = { ...groups };
       visibleGroupIds.forEach((groupId) => {
         nextGroups[groupId] = nextCollapsedState;
@@ -1315,11 +1465,47 @@ export function SearchSelector<T>(props: {
   };
 
   const toggleGroup = (groupId: string) => {
-    setCollapsedGroups((groups) => ({
+    updateCollapsedGroups((groups) => ({
       ...groups,
       [groupId]: !groups[groupId],
     }));
   };
+
+  const hoveredGroup = useMemo(
+    () =>
+      hoveredGroupId && collapsedGroups[hoveredGroupId]
+        ? groupedItems.find((group) => group.group.id === hoveredGroupId)
+        : undefined,
+    [collapsedGroups, groupedItems, hoveredGroupId],
+  );
+
+  useEffect(() => {
+    if (!hoveredGroup) {
+      return;
+    }
+
+    const flyoutElement = flyoutRef.current;
+    if (!flyoutElement) {
+      return;
+    }
+
+    const viewportPadding = 12;
+    const rect = flyoutElement.getBoundingClientRect();
+    const nextTop = Math.max(
+      viewportPadding,
+      Math.min(
+        flyoutPosition.top,
+        window.innerHeight - rect.height - viewportPadding,
+      ),
+    );
+
+    if (Math.abs(nextTop - flyoutPosition.top) > 1) {
+      setFlyoutPosition((position) => ({
+        ...position,
+        top: nextTop,
+      }));
+    }
+  }, [flyoutPosition.top, hoveredGroup]);
 
   const renderSelectedBadge = () => (
     <div
@@ -1438,12 +1624,26 @@ export function SearchSelector<T>(props: {
           {groupedItems.map(({ group, items, count }) => {
             const collapsed = collapsedGroups[group.id];
             return (
-              <div className={styles["selector-group"]} key={group.id}>
+              <div
+                className={`${styles["selector-group"]} ${
+                  collapsed ? styles["selector-group-collapsed"] : ""
+                }`}
+                key={group.id}
+                onMouseEnter={(e) =>
+                  openCollapsedGroupFlyout(group.id, e.currentTarget)
+                }
+                onMouseLeave={scheduleCloseGroupFlyout}
+              >
                 <button
                   type="button"
                   className={styles["selector-group-header"]}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (collapsed) {
+                      closeGroupFlyout();
+                    } else {
+                      openCollapsedGroupFlyout(group.id, e.currentTarget, true);
+                    }
                     toggleGroup(group.id);
                   }}
                 >
@@ -1471,6 +1671,34 @@ export function SearchSelector<T>(props: {
             <div className={styles["selector-empty"]}>No Models</div>
           )}
         </List>
+        {hoveredGroup && (
+          <div
+            ref={flyoutRef}
+            className={styles["selector-flyout"]}
+            style={{
+              top: flyoutPosition.top,
+              left: flyoutPosition.left,
+              width: flyoutPosition.width,
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseEnter={clearFlyoutCloseTimer}
+            onMouseLeave={scheduleCloseGroupFlyout}
+          >
+            <div className={styles["selector-flyout-header"]}>
+              <span className={styles["selector-group-icon"]}>
+                <Avatar model={hoveredGroup.group.iconModel} />
+              </span>
+              <span className={styles["selector-group-title"]}>
+                {hoveredGroup.group.label} ({hoveredGroup.count})
+              </span>
+            </div>
+            <List>
+              {hoveredGroup.items.map((item, i) =>
+                renderItem(item, `${hoveredGroup.group.id}-flyout-${i}`, false),
+              )}
+            </List>
+          </div>
+        )}
       </div>
     </div>
   );
