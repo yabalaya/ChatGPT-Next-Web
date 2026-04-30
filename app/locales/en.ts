@@ -1031,6 +1031,8 @@ const en: LocaleType = {
     SearchModel: "Search Model",
     SelectALL: "All Models",
     NoPresetRule: "No preset rules",
+    ExpandGroups: "Expand groups",
+    CollapseGroups: "Collapse groups",
     Replace: "Replace",
     MermaidError: "Mermaid rendering failed, please check the syntax",
   },

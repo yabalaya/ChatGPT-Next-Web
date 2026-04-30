@@ -557,6 +557,8 @@ const tw = {
     Sync: "同步",
     Config: "設定",
     SearchModel: "搜尋模型",
+    ExpandGroups: "展開分組",
+    CollapseGroups: "摺疊分組",
   },
   Exporter: {
     Description: {

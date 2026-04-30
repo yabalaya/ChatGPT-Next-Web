@@ -5,6 +5,7 @@ import EmojiPicker, {
 } from "emoji-picker-react";
 
 import { ModelType } from "../store";
+import { getModelFamily, ModelIconKey } from "../utils/model-groups";
 
 import BotIcon from "../icons/bot.svg";
 import BotIconBlack from "../icons/black-bot.svg";
@@ -20,7 +21,9 @@ import BotIconGLM from "../icons/llm-icons/glm.svg";
 import BotIconGrok from "../icons/llm-icons/grok.svg";
 import BotIconHunyuan from "../icons/llm-icons/hunyuan.svg";
 import BotIconInternlm from "../icons/llm-icons/internlm.svg";
+import BotIconKling from "../icons/llm-icons/kling.svg";
 import BotIconLlama from "../icons/llm-icons/llama.svg";
+import BotIconLongCat from "../icons/llm-icons/longcat.svg";
 import BotIconLuma from "../icons/llm-icons/luma.svg";
 import BotIconMidjourney from "../icons/llm-icons/midjourney.svg";
 import BotIconMinimax from "../icons/llm-icons/minimax.svg";
@@ -33,6 +36,7 @@ import BotIconStability from "../icons/llm-icons/stability.svg";
 import BotIconStep from "../icons/llm-icons/stepfun.svg";
 import BotIconSuno from "../icons/llm-icons/suno.svg";
 import BotIconWenxin from "../icons/llm-icons/wenxin.svg";
+import BotIconXiaomiMiMo from "../icons/llm-icons/xiaomimimo.svg";
 import BotIconYi from "../icons/llm-icons/yi.svg";
 
 export function getEmojiUrl(unified: string, style: EmojiStyle) {
@@ -61,93 +65,96 @@ export function AvatarPicker(props: {
 export function Avatar(props: { model?: ModelType; avatar?: string }) {
   if (props.model) {
     let IconComponent;
-    let model = props.model.toLowerCase();
-    switch (true) {
-      case /^(o1|o3)|gpt-(o1|o3)/.test(model):
+    const iconKey: ModelIconKey = getModelFamily(props.model).iconKey;
+    switch (iconKey) {
+      case "openai-reasoning":
         IconComponent = BotIconBlack;
         break;
-      case model.includes("gpt-"):
+      case "openai":
         IconComponent = BotIcon;
         break;
-      case model.includes("phi-"):
+      case "azure":
         IconComponent = BotIconAzure;
         break;
-      case model.includes("claude"):
+      case "claude":
         IconComponent = BotIconClaude;
         break;
-      case model.includes("command"):
+      case "cohere":
         IconComponent = BotIconCohere;
         break;
-      case model.includes("deepseek"):
+      case "deepseek":
         IconComponent = BotIconDeepseek;
         break;
-      case model.includes("doubao") || model.startsWith("ep-"):
+      case "doubao":
         IconComponent = BotIconDoubao;
         break;
-      case model.includes("flux"):
+      case "flux":
         IconComponent = BotIconFlux;
         break;
-      case model.includes("gemini") || model.includes("learnlm"):
+      case "gemini":
         IconComponent = BotIconGemini;
         break;
-      case model.includes("glm") ||
-        model.startsWith("cogview-") ||
-        model.startsWith("cogvideox-"):
+      case "glm":
         IconComponent = BotIconGLM;
         break;
-      case model.includes("grok"):
+      case "grok":
         IconComponent = BotIconGrok;
         break;
-      case model.includes("hunyuan"):
+      case "xiaomimimo":
+        IconComponent = BotIconXiaomiMiMo;
+        break;
+      case "longcat":
+        IconComponent = BotIconLongCat;
+        break;
+      case "hunyuan":
         IconComponent = BotIconHunyuan;
         break;
-      case model.includes("internlm"):
+      case "internlm":
         IconComponent = BotIconInternlm;
         break;
-      case model.includes("luma"):
+      case "luma":
         IconComponent = BotIconLuma;
         break;
-      case model.includes("llama"):
+      case "kling":
+        IconComponent = BotIconKling;
+        break;
+      case "llama":
         IconComponent = BotIconLlama;
         break;
-      case model.includes("midjourney") || model.includes("mj"):
+      case "midjourney":
         IconComponent = BotIconMidjourney;
         break;
-      case model.includes("abab"):
+      case "minimax":
         IconComponent = BotIconMinimax;
         break;
-      case model.includes("mistral") ||
-        model.includes("pixtral") ||
-        model.includes("codestral"):
+      case "mistral":
         IconComponent = BotIconMistral;
         break;
-      case model.includes("moonshot") || model.includes("kimi"):
+      case "moonshot":
         IconComponent = BotIconMoonshot;
         break;
-      case model.includes("qwen"):
+      case "qwen":
         IconComponent = BotIconQwen;
         break;
-      case model.includes("runway"):
+      case "runway":
         IconComponent = BotIconRunway;
         break;
-      case model.includes("sparkdesk"):
+      case "sparkdesk":
         IconComponent = BotIconSparkdesk;
         break;
-      case model.includes("stability") ||
-        model.includes("stable-diffusion") ||
-        model.includes("sd"):
+      case "stability":
         IconComponent = BotIconStability;
         break;
-      case model.includes("step"):
+      case "step":
         IconComponent = BotIconStep;
         break;
-      case model.includes("suno"):
+      case "suno":
         IconComponent = BotIconSuno;
         break;
-      case model.includes("ernie"):
+      case "wenxin":
         IconComponent = BotIconWenxin;
         break;
-      case model.includes("yi"):
+      case "yi":
         IconComponent = BotIconYi;
         break;
       default:

@@ -25,6 +25,11 @@ import React, {
 } from "react";
 import { IconButton } from "./button";
 import { useAccessStore } from "../store";
+import {
+  compareModelGroups,
+  getModelGroup,
+  ModelGroup,
+} from "../utils/model-groups";
 
 export function Popover(props: {
   children: JSX.Element;
@@ -1143,13 +1148,26 @@ export function showSvgModal(
     ),
   });
 }
+type SearchSelectorItem<T> = {
+  title: string;
+  subTitle?: string;
+  value: T;
+  disable?: boolean;
+  modelName?: string;
+};
+
+function getSearchSelectorItemModelName<T>(item: SearchSelectorItem<T>) {
+  if (item.modelName) {
+    return item.modelName;
+  }
+  if (typeof item.value === "string") {
+    return item.value.split(/@(?=[^@]*$)/)[0];
+  }
+  return item.title;
+}
+
 export function SearchSelector<T>(props: {
-  items: Array<{
-    title: string;
-    subTitle?: string;
-    value: T;
-    disable?: boolean;
-  }>;
+  items: Array<SearchSelectorItem<T>>;
   defaultSelectedValue?: T[] | T;
   onSelection?: (selection: T[]) => void;
   onClose?: () => void;
@@ -1165,12 +1183,20 @@ export function SearchSelector<T>(props: {
 
   // 添加搜索状态
   const [searchQuery, setSearchQuery] = useState("");
+  const [collapsedGroups, setCollapsedGroups] = useState<
+    Record<string, boolean>
+  >({});
   const inputRef = useRef<HTMLInputElement>(null);
 
   const accessStore = useAccessStore();
 
-  const [presetRules, setPresetRules] = useState<string[]>(
-    accessStore.selectLabels.split(",").filter((label) => label.trim() !== ""),
+  const presetRules = useMemo(
+    () =>
+      accessStore.selectLabels
+        .split(",")
+        .map((label) => label.trim())
+        .filter(Boolean),
+    [accessStore.selectLabels],
   );
   const [selectedRule, setSelectedRule] = useState<string>("");
 
@@ -1180,6 +1206,12 @@ export function SearchSelector<T>(props: {
       inputRef.current.focus();
     }
   }, []);
+
+  useEffect(() => {
+    if (searchQuery.trim() || selectedRule) {
+      setCollapsedGroups({});
+    }
+  }, [searchQuery, selectedRule]);
 
   const handleSelection = (e: MouseEvent, value: T) => {
     if (props.multiple) {
@@ -1196,36 +1228,154 @@ export function SearchSelector<T>(props: {
     }
   };
   // 过滤列表项
-  const filteredItems = props.items
-    .filter((item) => {
-      // 检查是否匹配搜索框
-      const searchMatch =
-        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.subTitle &&
-          item.subTitle.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (typeof item.value === "string" &&
-          item.value.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredItems = useMemo(
+    () =>
+      props.items
+        .filter((item) => {
+          const normalizedSearchQuery = searchQuery.toLowerCase();
+          // 检查是否匹配搜索框
+          const searchMatch =
+            item.title.toLowerCase().includes(normalizedSearchQuery) ||
+            (item.subTitle &&
+              item.subTitle.toLowerCase().includes(normalizedSearchQuery)) ||
+            (typeof item.value === "string" &&
+              item.value.toLowerCase().includes(normalizedSearchQuery));
 
-      // 检查是否匹配下拉列表规则，仅匹配模型描述中的文本
-      const ruleMatch =
-        selectedRule === "" || // 如果未选择规则，则规则匹配为 true
-        (typeof item.subTitle === "string" &&
-          item.subTitle.toLowerCase().includes(selectedRule.toLowerCase()));
+          // 检查是否匹配下拉列表规则，仅匹配模型描述中的文本
+          const ruleMatch =
+            selectedRule === "" || // 如果未选择规则，则规则匹配为 true
+            (typeof item.subTitle === "string" &&
+              item.subTitle.toLowerCase().includes(selectedRule.toLowerCase()));
 
-      return searchMatch && ruleMatch; // 两者都匹配才返回 true
-    })
-    .sort((a, b) => {
-      // 将选中的项目排在前面
-      const aSelected = selectedValues.includes(a.value);
-      const bSelected = selectedValues.includes(b.value);
-      if (aSelected && !bSelected) {
-        return -1;
+          return searchMatch && ruleMatch; // 两者都匹配才返回 true
+        })
+        .sort((a, b) => {
+          // 将选中的项目排在前面
+          const aSelected = selectedValues.includes(a.value);
+          const bSelected = selectedValues.includes(b.value);
+          if (aSelected && !bSelected) {
+            return -1;
+          }
+          if (!aSelected && bSelected) {
+            return 1;
+          }
+          return 0;
+        }),
+    [props.items, searchQuery, selectedRule, selectedValues],
+  );
+
+  const selectedItems = filteredItems.filter((item) =>
+    selectedValues.includes(item.value),
+  );
+
+  const groupedItems = useMemo(() => {
+    const groups = new Map<
+      string,
+      { group: ModelGroup; items: Array<SearchSelectorItem<T>>; count: number }
+    >();
+
+    filteredItems.forEach((item) => {
+      const group = getModelGroup(getSearchSelectorItemModelName(item));
+      const groupedItem = groups.get(group.id);
+
+      if (groupedItem) {
+        groupedItem.count += 1;
+        if (!selectedValues.includes(item.value)) {
+          groupedItem.items.push(item);
+        }
+      } else {
+        groups.set(group.id, {
+          group,
+          items: selectedValues.includes(item.value) ? [] : [item],
+          count: 1,
+        });
       }
-      if (!aSelected && bSelected) {
-        return 1;
-      }
-      return 0;
     });
+
+    return Array.from(groups.values())
+      .filter((group) => group.items.length > 0)
+      .sort((a, b) => compareModelGroups(a.group, b.group));
+  }, [filteredItems, selectedValues]);
+
+  const visibleGroupIds = groupedItems.map((group) => group.group.id);
+  const allGroupsCollapsed =
+    visibleGroupIds.length > 0 &&
+    visibleGroupIds.every((groupId) => collapsedGroups[groupId]);
+
+  const toggleAllGroups = (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    const nextCollapsedState = !allGroupsCollapsed;
+    setCollapsedGroups((groups) => {
+      const nextGroups = { ...groups };
+      visibleGroupIds.forEach((groupId) => {
+        nextGroups[groupId] = nextCollapsedState;
+      });
+      return nextGroups;
+    });
+  };
+
+  const toggleGroup = (groupId: string) => {
+    setCollapsedGroups((groups) => ({
+      ...groups,
+      [groupId]: !groups[groupId],
+    }));
+  };
+
+  const renderSelectedBadge = () => (
+    <div
+      style={{
+        height: 16,
+        width: 16,
+        backgroundColor: "var(--primary)",
+        borderRadius: 8,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 10 10"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M2 5L4 7L8 3"
+          stroke="white"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  );
+
+  const renderItem = (
+    item: SearchSelectorItem<T>,
+    key: string | number,
+    selected: boolean,
+  ) => (
+    <ListItem
+      className={`${styles["selector-item"]} ${
+        item.disable && styles["selector-item-disabled"]
+      }`}
+      key={key}
+      icon={<Avatar model={getSearchSelectorItemModelName(item)} />}
+      title={item.title}
+      subTitle={item.subTitle}
+      vertical={true}
+      onClick={(e) => {
+        if (item.disable) {
+          e.stopPropagation();
+        } else {
+          handleSelection(e, item.value);
+        }
+      }}
+    >
+      {selected ? renderSelectedBadge() : <></>}
+    </ListItem>
+  );
 
   return (
     <div className={styles["selector"]} onClick={() => props.onClose?.()}>
@@ -1234,100 +1384,92 @@ export function SearchSelector<T>(props: {
         onClick={(e) => e.stopPropagation()}
       >
         <List>
-          {/* 搜索框 */}
-          <div className={styles["selector-search"]}>
-            <input
-              ref={inputRef}
-              type="text"
-              className={styles["selector-search-input"]}
-              placeholder={Locale.UI.SearchModel}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-            />
-            <select
-              className={styles["selector-rule-select"]}
-              value={selectedRule}
-              onChange={(e) => {
-                setSelectedRule(e.target.value);
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {presetRules.length === 0 ? (
-                <>
-                  <option value="">{Locale.UI.SelectALL}</option>
-                  <option value="" disabled>
-                    <option key="0" value={Locale.UI.NoPresetRule}>
-                      {Locale.UI.NoPresetRule}
-                    </option>
-                  </option>
-                </>
-              ) : (
-                <>
-                  <option value="">{Locale.UI.SelectALL}</option>
-                  {presetRules.map((rule, index) => (
-                    <option key={index} value={rule}>
-                      {rule}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
-          </div>
-          {filteredItems.map((item, i) => {
-            const selected = selectedValues.includes(item.value);
-            return (
-              <ListItem
-                className={`${styles["selector-item"]} ${
-                  item.disable && styles["selector-item-disabled"]
-                }`}
-                key={i}
-                icon={<Avatar model={item.title as string} />}
-                title={item.title}
-                subTitle={item.subTitle}
-                vertical={true}
-                onClick={(e) => {
-                  if (item.disable) {
-                    e.stopPropagation();
-                  } else {
-                    handleSelection(e, item.value);
-                  }
-                }}
+          <div className={styles["selector-header"]}>
+            <div className={styles["selector-search"]}>
+              <input
+                ref={inputRef}
+                type="text"
+                className={styles["selector-search-input"]}
+                placeholder={Locale.UI.SearchModel}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <button
+                type="button"
+                className={styles["selector-collapse-button"]}
+                onClick={toggleAllGroups}
               >
-                {selected ? (
-                  <div
-                    style={{
-                      height: 16,
-                      width: 16,
-                      backgroundColor: "var(--primary)",
-                      borderRadius: 8,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <svg // 白色对勾图标
-                      width="10"
-                      height="10"
-                      viewBox="0 0 10 10"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
+                {allGroupsCollapsed
+                  ? Locale.UI.ExpandGroups
+                  : Locale.UI.CollapseGroups}
+              </button>
+            </div>
+            {presetRules.length > 0 && (
+              <div className={styles["selector-rules"]}>
+                {presetRules.map((rule, index) => {
+                  const active = selectedRule === rule;
+                  return (
+                    <button
+                      type="button"
+                      key={index}
+                      className={`${styles["selector-rule-pill"]} ${
+                        active ? styles["selector-rule-pill-active"] : ""
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedRule(active ? "" : rule);
+                      }}
                     >
-                      <path
-                        d="M2 5L4 7L8 3"
-                        stroke="white"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
+                      {rule}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {selectedItems.length > 0 && (
+            <div className={styles["selector-selected-items"]}>
+              {selectedItems.map((item, i) =>
+                renderItem(item, `selected-${i}`, true),
+              )}
+            </div>
+          )}
+          {groupedItems.map(({ group, items, count }) => {
+            const collapsed = collapsedGroups[group.id];
+            return (
+              <div className={styles["selector-group"]} key={group.id}>
+                <button
+                  type="button"
+                  className={styles["selector-group-header"]}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleGroup(group.id);
+                  }}
+                >
+                  <span className={styles["selector-group-icon"]}>
+                    <Avatar model={group.iconModel} />
+                  </span>
+                  <span className={styles["selector-group-title"]}>
+                    {group.label} ({count})
+                  </span>
+                  <span className={styles["selector-group-arrow"]}>
+                    {collapsed ? ">" : "v"}
+                  </span>
+                </button>
+                {!collapsed && (
+                  <div className={styles["selector-group-items"]}>
+                    {items.map((item, i) =>
+                      renderItem(item, `${group.id}-${i}`, false),
+                    )}
                   </div>
-                ) : (
-                  <></>
                 )}
-              </ListItem>
+              </div>
             );
           })}
+          {filteredItems.length === 0 && (
+            <div className={styles["selector-empty"]}>No Models</div>
+          )}
         </List>
       </div>
     </div>

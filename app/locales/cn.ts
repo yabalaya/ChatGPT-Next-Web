@@ -990,6 +990,8 @@ const cn = {
     SearchModel: "搜索模型",
     SelectALL: "所有模型",
     NoPresetRule: "未预置规则",
+    ExpandGroups: "展开分组",
+    CollapseGroups: "折叠分组",
     Replace: "替换",
     MermaidError: "Mermaid 渲染失败，请检查语法",
   },

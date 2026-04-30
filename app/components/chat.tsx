@@ -1613,10 +1613,11 @@ export function ChatActions(props: {
                 m?.provider?.providerName?.toLowerCase() === "openai" ||
                 m?.provider?.providerType === "custom-provider" ||
                 m?.provider?.providerName === m.name
-                  ? `${m.displayName}`
-                  : `${m.displayName} (${m?.provider?.providerName})`,
+                  ? `${m.displayName || m.name}`
+                  : `${m.displayName || m.name} (${m?.provider?.providerName})`,
               subTitle: m.description,
               value: `${m.name}@${m?.provider?.providerName}`,
+              modelName: m.name,
             }))}
             onClose={() => setShowModelSelector(false)}
             onSelection={(s) => {
@@ -7224,10 +7225,11 @@ function ChatComponent() {
               m?.provider?.providerName?.toLowerCase() === "openai" ||
               m?.provider?.providerType === "custom-provider" ||
               m?.provider?.providerName === m.name
-                ? `${m.displayName}`
-                : `${m.displayName} (${m?.provider?.providerName})`,
+                ? `${m.displayName || m.name}`
+                : `${m.displayName || m.name} (${m?.provider?.providerName})`,
             subTitle: m.description,
             value: `${m.name}@${m?.provider?.providerName}`,
+            modelName: m.name,
           }))}
           onClose={() => setShowPrimaryModelSelector(false)}
           onSelection={(s) => {
@@ -7261,10 +7263,11 @@ function ChatComponent() {
               m?.provider?.providerName?.toLowerCase() === "openai" ||
               m?.provider?.providerType === "custom-provider" ||
               m?.provider?.providerName === m.name
-                ? `${m.displayName}`
-                : `${m.displayName} (${m?.provider?.providerName})`,
+                ? `${m.displayName || m.name}`
+                : `${m.displayName || m.name} (${m?.provider?.providerName})`,
             subTitle: m.description,
             value: `${m.name}@${m?.provider?.providerName}`,
+            modelName: m.name,
           }))}
           onClose={() => setShowSecondaryModelSelector(false)}
           onSelection={(s) => {
