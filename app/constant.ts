@@ -82,6 +82,21 @@ export const STORAGE_KEY = "chatgpt-next-web";
 
 export const REQUEST_TIMEOUT_MS = 60000;
 
+// 辅助 LLM 调用按类型的请求超时（ms）。覆盖 modelConfig.requestTimeout。
+export const AUX_REQUEST_TIMEOUT_MS: Record<string, number> = {
+  translate: 30_000,
+  ocr: 60_000,
+  improve: 30_000,
+  topic: 30_000,
+  compress: 60_000,
+};
+
+// 流式请求 chunk 之间的空闲超时（ms）。超过则主动 abort。
+export const STREAM_IDLE_TIMEOUT_MS = 120_000;
+
+// 思考模型自动 ×10 放大后的硬上限（ms）。
+export const THINKING_MODEL_TIMEOUT_CAP_MS = 3600_000;
+
 export const EXPORT_MESSAGE_CLASS_NAME = "export-markdown";
 
 export enum ThinkingType {

@@ -781,6 +781,15 @@ export function ChatActions(props: {
     string | null
   >(null);
   const [optimizedPrompt, setOptimizedPrompt] = useState<string | null>(null);
+  // 辅助 LLM 调用（翻译/OCR/优化提示词）的 AbortController
+  // 用于：用户主动停止；触发新请求时 abort 上一个；组件卸载时清理
+  const auxAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => {
+      auxAbortRef.current?.abort();
+      auxAbortRef.current = null;
+    };
+  }, []);
   // privacy
   const [isPrivacying, setIsPrivacying] = useState(false);
   const [originalTextForPrivacy, setOriginalTextForPrivacy] = useState<
@@ -848,6 +857,8 @@ export function ChatActions(props: {
       showToast(Locale.Chat.InputActions.Translate.BlankToast);
       return;
     }
+    // 触发新请求前先 abort 上一次的 aux 调用
+    auxAbortRef.current?.abort();
     setIsTranslating(true);
     //
     const modelConfig = session.mask.modelConfig;
@@ -872,6 +883,12 @@ export function ChatActions(props: {
 
     const toastController = showPersistentToast(
       `${Locale.Chat.InputActions.Translate.isTranslatingToast}\n${displayName}`,
+      {
+        text: Locale.UI.Cancel,
+        onClick: () => {
+          auxAbortRef.current?.abort();
+        },
+      },
     );
 
     const api: ClientApi = getClientApi(providerName);
@@ -889,6 +906,10 @@ export function ChatActions(props: {
       config: {
         model: textProcessModel,
         stream: false,
+      },
+      type: "translate",
+      onController(controller) {
+        auxAbortRef.current = controller;
       },
       onFinish(message, responseRes) {
         if (responseRes?.status === 200) {
@@ -919,6 +940,18 @@ export function ChatActions(props: {
         }
         setIsTranslating(false);
       },
+      onError(err) {
+        const isAborted = err.message?.includes?.("aborted");
+        if (isAborted) {
+          toastController.close();
+        } else {
+          toastController.update(
+            Locale.Chat.InputActions.Translate.FailTranslateToast,
+            3000,
+          );
+        }
+        setIsTranslating(false);
+      },
     });
   };
   const handleOCR = async () => {
@@ -932,6 +965,8 @@ export function ChatActions(props: {
         return;
       }
     }
+    // 触发新请求前先 abort 上一次的 aux 调用
+    auxAbortRef.current?.abort();
     setIsOCRing(true);
     //
     const modelConfig = session.mask.modelConfig;
@@ -950,6 +985,12 @@ export function ChatActions(props: {
 
     const toastController = showPersistentToast(
       `${Locale.Chat.InputActions.OCR.isDetectingToast}\n${displayName}`,
+      {
+        text: Locale.UI.Cancel,
+        onClick: () => {
+          auxAbortRef.current?.abort();
+        },
+      },
     );
 
     const api: ClientApi = getClientApi(providerName);
@@ -976,6 +1017,10 @@ export function ChatActions(props: {
       config: {
         model: ocrModel,
         stream: false,
+      },
+      type: "ocr",
+      onController(controller) {
+        auxAbortRef.current = controller;
       },
       onFinish(message, responseRes) {
         if (responseRes?.status === 200) {
@@ -1006,6 +1051,18 @@ export function ChatActions(props: {
         }
         setIsOCRing(false);
       },
+      onError(err) {
+        const isAborted = err.message?.includes?.("aborted");
+        if (isAborted) {
+          toastController.close();
+        } else {
+          toastController.update(
+            Locale.Chat.InputActions.OCR.FailDetectToast,
+            3000,
+          );
+        }
+        setIsOCRing(false);
+      },
     });
   };
   const handleImprovePrompt = async () => {
@@ -1021,6 +1078,8 @@ export function ChatActions(props: {
       showToast(Locale.Chat.InputActions.ImprovePrompt.BlankToast);
       return;
     }
+    // 触发新请求前先 abort 上一次的 aux 调用
+    auxAbortRef.current?.abort();
     setIsImprovingPrompt(true);
     //
     const modelConfig = session.mask.modelConfig;
@@ -1041,6 +1100,12 @@ export function ChatActions(props: {
 
     const toastController = showPersistentToast(
       `${Locale.Chat.InputActions.ImprovePrompt.isImprovingToast}\n${displayName}`,
+      {
+        text: Locale.UI.Cancel,
+        onClick: () => {
+          auxAbortRef.current?.abort();
+        },
+      },
     );
 
     const api: ClientApi = getClientApi(providerName);
@@ -1058,6 +1123,10 @@ export function ChatActions(props: {
       config: {
         model: textProcessModel,
         stream: false,
+      },
+      type: "improve",
+      onController(controller) {
+        auxAbortRef.current = controller;
       },
       onFinish(message, responseRes) {
         if (responseRes?.status === 200) {
@@ -1080,6 +1149,18 @@ export function ChatActions(props: {
             Locale.Chat.InputActions.ImprovePrompt.SuccessImprovingToast,
             3000,
           );
+        } else {
+          toastController.update(
+            Locale.Chat.InputActions.ImprovePrompt.FailImprovingToast,
+            3000,
+          );
+        }
+        setIsImprovingPrompt(false);
+      },
+      onError(err) {
+        const isAborted = err.message?.includes?.("aborted");
+        if (isAborted) {
+          toastController.close();
         } else {
           toastController.update(
             Locale.Chat.InputActions.ImprovePrompt.FailImprovingToast,

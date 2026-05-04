@@ -84,7 +84,7 @@ export interface RichMessage {
 export interface ChatOptions {
   messages: RequestMessage[];
   config: LLMConfig;
-  type?: "chat" | "topic" | "compress" | "translate" | "ocr";
+  type?: "chat" | "topic" | "compress" | "translate" | "ocr" | "improve";
 
   onUpdate?: (message: string, chunk: string) => void;
   onFinish: (message: string | RichMessage, responseRes: Response) => void;

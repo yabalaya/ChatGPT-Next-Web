@@ -5,6 +5,9 @@ import {
   DEFAULT_MODELS,
   OpenaiPath,
   REQUEST_TIMEOUT_MS,
+  AUX_REQUEST_TIMEOUT_MS,
+  STREAM_IDLE_TIMEOUT_MS,
+  THINKING_MODEL_TIMEOUT_CAP_MS,
   ServiceProvider,
   ThinkingType,
   ThinkingTypeMap,
@@ -380,6 +383,11 @@ export class ChatGPTApi implements LLMApi {
       },
     };
     const requestTimeoutMS = (modelConfig.requestTimeout || 300) * 1000;
+    // 辅助调用（translate/ocr/improve/topic/compress）按类型使用更短的独立超时
+    const auxTimeout = options.type
+      ? AUX_REQUEST_TIMEOUT_MS[options.type]
+      : undefined;
+    const baseTimeoutMS = auxTimeout ?? requestTimeoutMS;
 
     // O1 not support image, tools (plugin in ChatGPTNextWeb) and system, stream, logprobs, temperature, top_p, n, presence_penalty, frequency_penalty yet.
     let requestPayload: RequestPayload;
@@ -490,10 +498,34 @@ export class ChatGPTApi implements LLMApi {
       };
 
       // make a fetch request
+      // 仅对非辅助调用、且是思考模型时放大 ×10，并加 600s 上限
+      const finalTimeoutMS = auxTimeout
+        ? baseTimeoutMS
+        : thinkingModel
+        ? Math.min(baseTimeoutMS * 10, THINKING_MODEL_TIMEOUT_CAP_MS)
+        : baseTimeoutMS;
       const requestTimeoutId = setTimeout(
         () => controller.abort(),
-        thinkingModel ? requestTimeoutMS * 10 : requestTimeoutMS,
+        finalTimeoutMS,
       );
+
+      // 流式 chunk 空闲超时：onopen 后启动，每收到一个 chunk 重置；超 STREAM_IDLE_TIMEOUT_MS 无消息则 abort
+      let streamIdleTimer: ReturnType<typeof setTimeout> | null = null;
+      const resetStreamIdleTimer = () => {
+        if (streamIdleTimer) clearTimeout(streamIdleTimer);
+        streamIdleTimer = setTimeout(() => {
+          console.warn(
+            `[OpenAI] stream idle for ${STREAM_IDLE_TIMEOUT_MS}ms, aborting`,
+          );
+          controller.abort();
+        }, STREAM_IDLE_TIMEOUT_MS);
+      };
+      const clearStreamIdleTimer = () => {
+        if (streamIdleTimer) {
+          clearTimeout(streamIdleTimer);
+          streamIdleTimer = null;
+        }
+      };
 
       if (shouldStream) {
         let responseText = "";
@@ -548,6 +580,7 @@ export class ChatGPTApi implements LLMApi {
         const finish = async () => {
           if (!finished || controller.signal.aborted) {
             finished = true;
+            clearStreamIdleTimer();
             if (isInThinking || !totalThinkingLatency) {
               totalThinkingLatency =
                 Date.now() -
@@ -601,6 +634,7 @@ export class ChatGPTApi implements LLMApi {
           ...chatPayload,
           async onopen(res) {
             clearTimeout(requestTimeoutId);
+            resetStreamIdleTimer();
             const contentType = res.headers.get("content-type");
             console.log(
               "[OpenAI] request response content type: ",
@@ -640,6 +674,7 @@ export class ChatGPTApi implements LLMApi {
             if (msg.data === "[DONE]" || finished) {
               return finish();
             }
+            resetStreamIdleTimer();
             const text = msg.data;
             try {
               const json = JSON.parse(text);
@@ -830,9 +865,11 @@ export class ChatGPTApi implements LLMApi {
             }
           },
           onclose() {
+            clearStreamIdleTimer();
             finish();
           },
           onerror(e) {
+            clearStreamIdleTimer();
             options.onError?.(e);
             throw e;
           },
