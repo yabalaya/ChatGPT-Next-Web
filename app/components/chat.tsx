@@ -2034,21 +2034,71 @@ export function EditMessageModal(props: { onClose: () => void }) {
         ]}
       >
         <List>
-          <ListItem
-            title={Locale.Chat.EditMessage.Topic.Title}
-            subTitle={Locale.Chat.EditMessage.Topic.SubTitle}
-          >
-            <input
-              type="text"
-              value={session.topic}
-              onInput={(e) =>
-                chatStore.updateTargetSession(
-                  session,
-                  (session) => (session.topic = e.currentTarget.value),
-                )
-              }
-            ></input>
-          </ListItem>
+          {!!session.mask?.name && session.mask.name !== DEFAULT_TOPIC ? (
+            (() => {
+              const maskName = session.mask.name;
+              const match = session.topic.match(/^\[([^\]]+)\]\s+(.+)$/);
+              const parsedRole = match ? match[1] : maskName;
+              const parsedTitle = match
+                ? match[2]
+                : session.topic === maskName
+                ? ""
+                : session.topic;
+              const compose = (role: string, title: string) =>
+                role && title ? `[${role}] ${title}` : role || title;
+              return (
+                <>
+                  <ListItem
+                    title={Locale.Chat.EditMessage.Role.Title}
+                    subTitle={Locale.Chat.EditMessage.Role.SubTitle}
+                  >
+                    <input
+                      type="text"
+                      value={parsedRole}
+                      onInput={(e) => {
+                        const newRole = e.currentTarget.value;
+                        chatStore.updateTargetSession(session, (s) => {
+                          if (s.mask) s.mask.name = newRole;
+                          s.topic = compose(newRole, parsedTitle);
+                        });
+                      }}
+                    ></input>
+                  </ListItem>
+                  <ListItem
+                    title={Locale.Chat.EditMessage.Topic.Title}
+                    subTitle={Locale.Chat.EditMessage.Topic.SubTitle}
+                  >
+                    <input
+                      type="text"
+                      value={parsedTitle}
+                      onInput={(e) => {
+                        const newTitle = e.currentTarget.value;
+                        chatStore.updateTargetSession(session, (s) => {
+                          s.topic = compose(parsedRole, newTitle);
+                        });
+                      }}
+                    ></input>
+                  </ListItem>
+                </>
+              );
+            })()
+          ) : (
+            <ListItem
+              title={Locale.Chat.EditMessage.Topic.Title}
+              subTitle={Locale.Chat.EditMessage.Topic.SubTitle}
+            >
+              <input
+                type="text"
+                value={session.topic}
+                onInput={(e) =>
+                  chatStore.updateTargetSession(
+                    session,
+                    (session) => (session.topic = e.currentTarget.value),
+                  )
+                }
+              ></input>
+            </ListItem>
+          )}
         </List>
         <ContextPrompts
           context={messages}

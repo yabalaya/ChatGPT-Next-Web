@@ -31,6 +31,7 @@ import { AuthPage } from "./auth";
 import { getClientConfig } from "../config/client";
 import { ClientApi } from "../client/api";
 import { useAccessStore, useChatStore } from "../store";
+import { DEFAULT_TOPIC } from "../store/chat";
 import { identifyDefaultClaudeModel } from "../utils/checkers";
 import { FloatingButton } from "./floating-button";
 import buttonStyles from "./button.module.scss";
@@ -149,6 +150,34 @@ function useHtmlLang() {
       document.documentElement.lang = lang;
     }
   }, []);
+}
+
+function useDocumentTitle() {
+  const siteTitle = useAccessStore((s) => s.siteTitle);
+  const sessionInfo = useChatStore((s) => {
+    const current = s.sessions[s.currentSessionIndex];
+    return {
+      topic: current?.topic ?? "",
+      maskName: current?.mask?.name ?? "",
+      inPrivateMode: !!current?.inPrivateMode,
+    };
+  });
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const base = siteTitle || "NextChat";
+    const { topic, maskName, inPrivateMode } = sessionInfo;
+    const match = topic.match(/^\[[^\]]+\]\s+(.+)$/);
+    let title = match ? match[1] : topic;
+    if (maskName && title === maskName) title = "";
+    const useTopic = !!title && title !== DEFAULT_TOPIC && !inPrivateMode;
+    document.title = useTopic ? `${title} - ${base}` : base;
+  }, [
+    siteTitle,
+    sessionInfo.topic,
+    sessionInfo.maskName,
+    sessionInfo.inPrivateMode,
+  ]);
 }
 
 const useHasHydrated = () => {
@@ -327,6 +356,7 @@ export function Home() {
   useSwitchTheme();
   useLoadData();
   useHtmlLang();
+  useDocumentTitle();
 
   useEffect(() => {
     console.log("[Config] got config from build time", getClientConfig());

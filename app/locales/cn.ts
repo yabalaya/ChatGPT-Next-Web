@@ -21,6 +21,7 @@ const cn = {
   ChatItem: {
     ChatItemCount: (count: number) => `${count} 条对话`,
     Actions: {
+      NewChatWithMask: "用此角色新建对话",
       Share: "分享",
       Rename: "重命名",
       Pin: "置顶聊天",
@@ -39,6 +40,10 @@ const cn = {
       Topic: {
         Title: "聊天主题",
         SubTitle: "更改当前聊天主题",
+      },
+      Role: {
+        Title: "角色名",
+        SubTitle: "更改当前会话使用的角色名称",
       },
     },
     Actions: {

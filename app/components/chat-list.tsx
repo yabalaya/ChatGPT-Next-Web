@@ -3,6 +3,7 @@ import PinIcon from "../icons/pin.svg";
 import ShareIcon from "../icons/share.svg";
 import RenameIcon from "../icons/rename.svg";
 import MoreIcon from "../icons/more.svg";
+import ChatIcon from "../icons/chat.svg";
 
 import styles from "./chat-list.module.scss";
 import {
@@ -14,6 +15,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { useChatStore } from "../store";
+import { DEFAULT_TOPIC } from "../store/chat";
 
 import Locale from "../locales";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -30,6 +32,8 @@ function ChatItemDropdown(props: {
   onPin?: () => void;
   onUnpin?: () => void;
   onDelete?: () => void;
+  onNewChatWithMask?: () => void;
+  hasMask?: boolean;
   pinned?: boolean;
   onClose: () => void;
   onMouseEnter?: () => void;
@@ -52,6 +56,15 @@ function ChatItemDropdown(props: {
   }, [props.onClose]);
 
   const menuItems = [
+    ...(props.hasMask
+      ? [
+          {
+            icon: <ChatIcon />,
+            label: Locale.ChatItem.Actions.NewChatWithMask,
+            onClick: props.onNewChatWithMask,
+          },
+        ]
+      : []),
     {
       icon: <ShareIcon />,
       label: Locale.ChatItem.Actions.Share,
@@ -119,6 +132,8 @@ export function ChatItem(props: {
   onUnpin?: () => void;
   onShare?: () => void;
   onRename?: () => void;
+  onNewChatWithMask?: () => void;
+  hasMask?: boolean;
   title: string;
   count: number;
   time: string;
@@ -256,6 +271,8 @@ export function ChatItem(props: {
                 onPin={props.onPin}
                 onUnpin={props.onUnpin}
                 onDelete={props.onDelete}
+                onNewChatWithMask={props.onNewChatWithMask}
+                hasMask={props.hasMask}
                 pinned={props.pinned}
                 onClose={() => setShowDropdown(false)}
                 onMouseEnter={handleDropdownMouseEnter}
@@ -426,6 +443,11 @@ export function ChatList(props: { narrow?: boolean }) {
                     );
                   }
                 }}
+                onNewChatWithMask={() => {
+                  chatStore.newSession(item.mask);
+                  navigate(Path.Chat);
+                }}
+                hasMask={!!item.mask?.name && item.mask.name !== DEFAULT_TOPIC}
                 narrow={props.narrow}
                 mask={item.mask}
               />

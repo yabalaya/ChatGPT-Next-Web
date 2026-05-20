@@ -23,6 +23,7 @@ const en: LocaleType = {
   ChatItem: {
     ChatItemCount: (count: number) => `${count} messages`,
     Actions: {
+      NewChatWithMask: "New chat with this role",
       Share: "Share",
       Rename: "Rename",
       Pin: "Pin Chat",
@@ -41,6 +42,10 @@ const en: LocaleType = {
       Topic: {
         Title: "Topic",
         SubTitle: "Change the current topic",
+      },
+      Role: {
+        Title: "Role",
+        SubTitle: "Change the role name for this session",
       },
     },
     Actions: {

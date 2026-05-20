@@ -1889,9 +1889,11 @@ export const useChatStore = createPersistStore(
 
         // should summarize topic after chating more than 50 words
         const SUMMARIZE_MIN_LEN = 50;
+        const isMaskInitialTopic =
+          !!session.mask?.name && session.topic === session.mask.name;
         if (
           (config.enableAutoGenerateTitle &&
-            session.topic === DEFAULT_TOPIC &&
+            (session.topic === DEFAULT_TOPIC || isMaskInitialTopic) &&
             countMessages(messages) >= SUMMARIZE_MIN_LEN) ||
           refreshTitle
         ) {
@@ -1952,14 +1954,17 @@ export const useChatStore = createPersistStore(
                   showToast(Locale.Chat.Actions.FailTitleToast);
                   return;
                 }
-                get().updateTargetSession(
-                  session,
-                  (session) =>
-                    (session.topic =
-                      replyContent.length > 0
-                        ? trimTopic(replyContent)
-                        : DEFAULT_TOPIC),
-                );
+                get().updateTargetSession(session, (session) => {
+                  if (replyContent.length === 0) {
+                    session.topic = session.mask?.name || DEFAULT_TOPIC;
+                    return;
+                  }
+                  const trimmed = trimTopic(replyContent);
+                  const maskName = session.mask?.name;
+                  session.topic = maskName
+                    ? `[${maskName}] ${trimmed}`
+                    : trimmed;
+                });
               }
             },
           });
