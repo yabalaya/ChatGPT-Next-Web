@@ -34,6 +34,16 @@ const en: LocaleType = {
       Title: "Delete this chat?",
       LastMessage: "Last message:",
     },
+    Group: {
+      Pinned: "Pinned",
+      Today: "Today",
+      Last7Days: "Last 7 Days",
+      ThisMonth: "This Month",
+      Earlier: "Earlier",
+      CollapseAll: "Collapse All",
+      ExpandAll: "Expand All",
+      Role: "Role",
+    },
   },
   Chat: {
     SubTitle: (count: number) => `${count} messages`,

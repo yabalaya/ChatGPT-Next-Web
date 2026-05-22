@@ -32,6 +32,16 @@ const cn = {
       Title: "确认删除此会话？",
       LastMessage: "最后一条消息：",
     },
+    Group: {
+      Pinned: "置顶",
+      Today: "今天",
+      Last7Days: "最近 7 天",
+      ThisMonth: "本月内",
+      Earlier: "更多",
+      CollapseAll: "全部折叠",
+      ExpandAll: "全部展开",
+      Role: "角色",
+    },
   },
   Chat: {
     SubTitle: (count: number) => `共 ${count} 条对话`,
