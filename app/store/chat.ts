@@ -1892,7 +1892,9 @@ export const useChatStore = createPersistStore(
         // should summarize topic after chating more than 50 words
         const SUMMARIZE_MIN_LEN = 50;
         const isMaskInitialTopic =
-          !!session.mask?.name && session.topic === session.mask.name;
+          !!session.mask?.name &&
+          session.mask.name !== DEFAULT_TOPIC &&
+          session.topic === session.mask.name;
         if (
           (config.enableAutoGenerateTitle &&
             (session.topic === DEFAULT_TOPIC || isMaskInitialTopic) &&
@@ -1963,9 +1965,10 @@ export const useChatStore = createPersistStore(
                   }
                   const trimmed = trimTopic(replyContent);
                   const maskName = session.mask?.name;
-                  session.topic = maskName
-                    ? `[${maskName}] ${trimmed}`
-                    : trimmed;
+                  session.topic =
+                    maskName && maskName !== DEFAULT_TOPIC
+                      ? `[${maskName}] ${trimmed}`
+                      : trimmed;
                 });
               }
             },
