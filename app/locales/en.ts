@@ -844,6 +844,9 @@ const en: LocaleType = {
       EnabledSubTitle: "Toggle automatic text replacement",
       TriggerPrefixTitle: "Trigger Prefix",
       TriggerPrefixSubTitle: "Prefix character for built-in rule triggers",
+      PunctuationNormTitle: "CJK Punctuation Compatibility",
+      PunctuationNormSubTitle:
+        "Match both full-width and half-width punctuation prefixes (e.g. ：and :)",
       SelectAll: "Select All",
       UnselectAll: "Unselect All",
     },

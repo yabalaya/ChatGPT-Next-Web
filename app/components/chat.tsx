@@ -3775,6 +3775,27 @@ function ChatComponent() {
   }, [hideQuoteBubble]);
 
   // expansive rules
+  const PUNCTUATION_MAP: Record<string, string> = {
+    ":": "：",
+    ";": "；",
+    "/": "／",
+    "!": "！",
+    "#": "＃",
+    "~": "～",
+    "：": ":",
+    "；": ";",
+    "／": "/",
+    "！": "!",
+    "＃": "#",
+    "～": "~",
+  };
+  const getTriggerVariants = (trigger: string): string[] => {
+    const first = trigger[0];
+    const alt = PUNCTUATION_MAP[first];
+    if (alt) return [trigger, alt + trigger.slice(1)];
+    return [trigger];
+  };
+
   const [lastExpansion, setLastExpansion] = useState<{
     originalText: string;
     replacedText: string;
@@ -3916,40 +3937,45 @@ function ChatComponent() {
           .getState()
           .getEnabledRulesWithPrefix(config.expansionTriggerPrefix);
         for (const rule of enabledRules) {
-          if (text.endsWith(rule.trigger)) {
-            const beforeTrigger = text.slice(
-              0,
-              text.length - rule.trigger.length,
-            );
-            const processedReplacement = processVariables(rule.replacement);
-            // 处理光标位置
-            const cursorPos = processedReplacement.indexOf("$|$");
-            let newText =
-              beforeTrigger + processedReplacement.replace("$|$", "");
+          const variants = config.enablePunctuationNormalization
+            ? getTriggerVariants(rule.trigger)
+            : [rule.trigger];
+          let matched = false;
+          for (const variant of variants) {
+            if (text.endsWith(variant)) {
+              const beforeTrigger = text.slice(0, text.length - variant.length);
+              const processedReplacement = processVariables(rule.replacement);
+              // 处理光标位置
+              const cursorPos = processedReplacement.indexOf("$|$");
+              let newText =
+                beforeTrigger + processedReplacement.replace("$|$", "");
 
-            // 记录这次替换的信息，用于可能的还原
-            setLastExpansion({
-              originalText: text,
-              replacedText: newText,
-              triggerLength: rule.trigger.length,
-            });
+              // 记录这次替换的信息，用于可能的还原
+              setLastExpansion({
+                originalText: text,
+                replacedText: newText,
+                triggerLength: variant.length,
+              });
 
-            setUserInput(newText);
+              setUserInput(newText);
 
-            // 设置光标位置
-            if (cursorPos >= 0) {
-              setTimeout(() => {
-                if (inputRef.current) {
-                  const targetPos = beforeTrigger.length + cursorPos;
-                  inputRef.current.setSelectionRange(targetPos, targetPos);
-                  inputRef.current.focus();
-                }
-              }, 0);
+              // 设置光标位置
+              if (cursorPos >= 0) {
+                setTimeout(() => {
+                  if (inputRef.current) {
+                    const targetPos = beforeTrigger.length + cursorPos;
+                    inputRef.current.setSelectionRange(targetPos, targetPos);
+                    inputRef.current.focus();
+                  }
+                }, 0);
+              }
+
+              shouldProcessNormally = false;
+              matched = true;
+              break;
             }
-
-            shouldProcessNormally = false;
-            break;
           }
+          if (matched) break;
         }
       }
     }

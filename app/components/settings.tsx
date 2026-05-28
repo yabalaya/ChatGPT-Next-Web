@@ -2644,6 +2644,22 @@ export function Settings() {
         </ListItem>
 
         <ListItem
+          title={Locale.Settings.Expansion.PunctuationNormTitle}
+          subTitle={Locale.Settings.Expansion.PunctuationNormSubTitle}
+        >
+          <input
+            type="checkbox"
+            checked={config.enablePunctuationNormalization}
+            onChange={(e) =>
+              config.update(
+                (c) =>
+                  (c.enablePunctuationNormalization = e.currentTarget.checked),
+              )
+            }
+          />
+        </ListItem>
+
+        <ListItem
           title={Locale.Settings.Expansion.TriggerPrefixTitle}
           subTitle={Locale.Settings.Expansion.TriggerPrefixSubTitle}
         >

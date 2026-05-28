@@ -59,6 +59,7 @@ export const DEFAULT_CONFIG = {
   enableShowUserContinuePrompt: false,
   customUserContinuePrompt: "",
   enableTextExpansion: true,
+  enablePunctuationNormalization: false,
   expansionTriggerPrefix: ":" as string,
 
   dontShowMaskSplashScreen: true, // dont show splash screen when create chat

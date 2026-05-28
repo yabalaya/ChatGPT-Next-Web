@@ -811,6 +811,8 @@ const cn = {
       EnabledSubTitle: "是否启用自动文本替换功能",
       TriggerPrefixTitle: "触发前缀",
       TriggerPrefixSubTitle: "内置规则的触发前缀字符",
+      PunctuationNormTitle: "中英文标点兼容",
+      PunctuationNormSubTitle: "自动识别全角/半角标点触发前缀（如 ：和 :）",
       SelectAll: "全选",
       UnselectAll: "取消全选",
     },
