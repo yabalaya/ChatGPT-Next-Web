@@ -905,14 +905,7 @@ function ImageModalContent({
 
     setScale(Math.min(Math.max(newScale, minScale), maxScale));
     setOffset({ x: 0, y: 0 });
-  }, [
-    getSvgSize,
-    maxScale,
-    minScale,
-    normalizedSvg,
-    svgIntrinsicSize,
-    svgSize,
-  ]);
+  }, [maxScale, minScale, normalizedSvg, svgIntrinsicSize, svgSize]);
 
   useEffect(() => {
     if (isAdaptive && normalizedSvg && svgIntrinsicSize) {
