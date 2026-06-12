@@ -399,7 +399,9 @@
       opacity: 0.8;
       transition: opacity 0.2s;
       flex-wrap: wrap;
-      
+      min-width: 320px;
+      justify-content: flex-end;
+
       &:hover {
         opacity: 1;
       }
@@ -1110,6 +1112,43 @@
   bottom: 26px;
   right: 34px;
   z-index: 1;
+}
+
+// 解析预览弹窗
+.parsingPreviewModal {
+  background-color: var(--white);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.08);
+  width: 460px;
+  max-width: 90vw;
+  overflow: hidden;
+}
+.parsingPreviewBody {
+  padding: 16px 20px;
+}
+.parsingPreviewRow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-in-light);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+.parsingPreviewLabel {
+  flex-shrink: 0;
+  width: 52px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.parsingPreviewValue {
+  font-size: var(--text-sm);
+  color: var(--black);
+  word-break: break-all;
+  font-family: "Cascadia Code", "Consolas", monospace;
 }
 // 添加模型内容布局
 .modelContent {

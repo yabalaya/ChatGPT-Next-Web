@@ -1227,6 +1227,13 @@ const en: LocaleType = {
     ParsingPlaceholder:
       "Please provide a sample request or the text containing the API information you would like me to parse.",
     IntelligentParsing: "IntelligentParsing",
+    ParsingPreview: "Preview",
+    ApplyParsedData: "Apply",
+    CancelParsing: "Cancel",
+    ParsedName: "Name",
+    ParsedUrl: "URL",
+    ParsedKey: "Key",
+    ParsedType: "Type",
     KeyListView: "Key: List View",
     NormalView: "Key: Normal View",
     AddKey: "Add Key",

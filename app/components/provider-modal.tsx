@@ -289,7 +289,7 @@ export function ProviderModal(props: ProviderModalProps) {
   const [editedDescription, setEditedDescription] = useState("");
   const [editedEnableVision, setEditedEnableVision] = useState(false);
   // API Key 列表视图状态
-  const [isKeyListViewMode, setIsKeyListViewMode] = useState(true);
+  const [isKeyListViewMode, setIsKeyListViewMode] = useState(!!props.provider);
   const [keyList, setKeyList] = useState<string[]>([]);
   const [newKey, setNewKey] = useState("");
   const [keyInputError, setKeyInputError] = useState<string | null>(null);
@@ -414,62 +414,166 @@ export function ProviderModal(props: ProviderModalProps) {
   }, [props.provider]);
 
   const [rawInput, setRawInput] = useState("");
+  const [parsedPreview, setParsedPreview] = useState<{
+    name: string;
+    baseUrl: string;
+    apiKey: string;
+    apiKeys: string[];
+    type: string;
+  } | null>(null);
+
+  // 根据 URL 域名推断 provider type
+  const inferProviderType = (url: string): string => {
+    try {
+      const hostname = new URL(url).hostname;
+      for (const [type, defaultUrl] of Object.entries(
+        providerTypeDefaultUrls,
+      )) {
+        const defaultHostname = new URL(defaultUrl).hostname;
+        if (
+          hostname === defaultHostname ||
+          hostname.endsWith(`.${defaultHostname}`)
+        ) {
+          return type;
+        }
+      }
+    } catch {}
+    return "openai";
+  };
+
+  // 密钥中间打码：sk-1234abcd...→ sk-1234*****abcd
+  const maskApiKey = (key: string): string => {
+    if (key.length <= 12) return key;
+    const front = key.substring(0, 7);
+    const back = key.substring(key.length - 4);
+    return `${front}${"*".repeat(5)}${back}`;
+  };
+
   const parseRawInput = () => {
     if (!rawInput.trim()) {
       showToast(Locale.CustomProvider.Toast.ParsingEmpty);
       return;
     }
 
-    // Initial data to be filled
-    let parsedName = "";
+    // 预处理：去除 Markdown 代码块包裹
+    let text = rawInput
+      .replace(/^```[\w]*\n?/gm, "")
+      .replace(/```$/gm, "")
+      .trim();
+
     let parsedUrl = "";
     let parsedApiKey = "";
 
-    // Extract name (first line is usually the name)
-    const lines = rawInput.split("\n");
-    if (lines.length > 0) {
-      parsedName = lines[0].trim();
-    }
-
-    // Extract URL with regex
-    const urlRegex = /(https?:\/\/[^\s]+)/i;
-    const urlMatch = rawInput.match(urlRegex);
-    if (urlMatch && urlMatch[1]) {
-      let url = urlMatch[1].replace(/["'<>()\[\]]+$/, "").trim();
-
-      // Process URL according to the rules
-      const urlObj = new URL(url);
-      const mainDomain = `${urlObj.protocol}//${urlObj.hostname}`;
-
-      // Check if it ends with 'completions' but is NOT 'v1/chat/completions'
-      if (url.endsWith("completions") && !url.endsWith("v1/chat/completions")) {
-        // For completions endpoints (not standard OpenAI path), add '#'
-        parsedUrl = url + "#";
-      } else {
-        // For all other cases, use just the main domain
-        parsedUrl = mainDomain;
+    // === 提取 URL ===
+    // 优先匹配 .env 格式: BASE_URL=xxx / base_url=xxx
+    const envUrlMatch = text.match(
+      /(?:BASE_URL|base_url|API_URL|api_url|OPENAI_BASE_URL)\s*[=:]\s*["']?(https?:\/\/[^\s"'<>,;]+)/i,
+    );
+    if (envUrlMatch) {
+      parsedUrl = envUrlMatch[1].replace(/["'<>()\[\],;]+$/, "").trim();
+    } else {
+      // 通用 URL 正则
+      const urlMatch = text.match(/(https?:\/\/[^\s"'<>,;]+)/i);
+      if (urlMatch) {
+        parsedUrl = urlMatch[1].replace(/["'<>()\[\],;]+$/, "").trim();
       }
     }
-    // Extract API key with regex
-    const apiKeyRegex = /(sk-[^\s]+)/i;
-    const apiKeyMatch = rawInput.match(apiKeyRegex);
-    if (apiKeyMatch && apiKeyMatch[1]) {
-      parsedApiKey = apiKeyMatch[1].trim();
+
+    // URL 处理：截断到主域名，非标准 completions 路径加 '#'
+    let baseUrlForForm = parsedUrl;
+    if (parsedUrl) {
+      try {
+        const urlObj = new URL(parsedUrl);
+        const mainDomain = `${urlObj.protocol}//${urlObj.hostname}`;
+        if (
+          parsedUrl.endsWith("completions") &&
+          !parsedUrl.endsWith("v1/chat/completions")
+        ) {
+          baseUrlForForm = parsedUrl + "#";
+        } else {
+          baseUrlForForm = mainDomain;
+        }
+      } catch {}
     }
 
-    // Update form data
+    // === 提取 API Key（支持多个）===
+    let parsedApiKeys: string[] = [];
+
+    // 优先匹配 .env 格式: API_KEY=xxx / OPENAI_API_KEY=xxx 等
+    const envKeyMatches = [
+      ...text.matchAll(
+        /(?:API_KEY|api_key|OPENAI_API_KEY|openai_api_key|SECRET_KEY|secret_key)\s*[=:]\s*["']?([a-zA-Z0-9_\-]{10,})["']?/gi,
+      ),
+    ];
+    if (envKeyMatches.length > 0) {
+      parsedApiKeys = envKeyMatches.map((m) => m[1]);
+    }
+
+    // 匹配 sk- 前缀的 key（兼容 sk-or- 等变体）
+    if (parsedApiKeys.length === 0) {
+      const skMatches = [...text.matchAll(/(sk-[a-zA-Z0-9_\-]{8,})/gi)];
+      if (skMatches.length > 0) {
+        parsedApiKeys = skMatches.map((m) => m[1]);
+      }
+    }
+
+    // 匹配 bearer token 格式
+    if (parsedApiKeys.length === 0) {
+      const bearerMatch = text.match(
+        /(?:Bearer|bearer|BEARER)\s+([a-zA-Z0-9_\-\.]{20,})/,
+      );
+      if (bearerMatch) {
+        parsedApiKeys = [bearerMatch[1]];
+      }
+    }
+
+    parsedApiKey = parsedApiKeys.join(",");
+
+    // === 推断 Provider Type ===
+    const inferredType = baseUrlForForm
+      ? inferProviderType(baseUrlForForm)
+      : "openai";
+
+    // === 生成名称（从域名提取核心名称）===
+    let inferredName = "";
+    if (parsedUrl) {
+      try {
+        const hostname = new URL(parsedUrl).hostname;
+        // api.siliconflow.cn → siliconflow, openrouter.ai → openrouter
+        const nameMatch = hostname.match(
+          /^(?:api\d*\.)?([a-zA-Z0-9]+)\.[a-zA-Z]+(?:\.[a-zA-Z]+)?$/,
+        );
+        inferredName = nameMatch ? nameMatch[1] : hostname;
+      } catch {}
+    }
+
+    setParsedPreview({
+      name: inferredName,
+      baseUrl: baseUrlForForm,
+      apiKey: parsedApiKey,
+      apiKeys: parsedApiKeys,
+      type: inferredType,
+    });
+
+    showToast(Locale.CustomProvider.Toast.ParsingSuccess);
+  };
+
+  const applyParsedPreview = () => {
+    if (!parsedPreview) return;
     setFormData((prev) => ({
       ...prev,
-      name: parsedName || prev.name,
-      baseUrl: parsedUrl || prev.baseUrl,
-      apiKey: parsedApiKey || prev.apiKey,
+      name: parsedPreview.name || prev.name,
+      baseUrl: parsedPreview.baseUrl || prev.baseUrl,
+      apiKey: parsedPreview.apiKey || prev.apiKey,
+      type: parsedPreview.type || prev.type,
+      testModel:
+        providerTypeDefaultTestModel[parsedPreview.type] || prev.testModel,
+      enableKeyList: parsedPreview.apiKeys,
+      disableKeyList: [],
     }));
-
-    // Clear the raw input area
-    // setRawInput("");
-
-    // Show success message
-    showToast(Locale.CustomProvider.Toast.ParsingSuccess);
+    setKeyList(parsedPreview.apiKeys);
+    setIsKeyListViewMode(true);
+    setParsedPreview(null);
   };
 
   const handleChange = (name: string, value: string) => {
@@ -503,25 +607,30 @@ export function ProviderModal(props: ProviderModalProps) {
       disableKeyList: formData.disableKeyList || [],
     };
     props.onSave(saveData);
+    props.onClose();
   };
 
   const handleClose = async () => {
-    const confirmContent = (
-      <div className={styles.confirmDialogContent}>
-        <div>{Locale.CustomProvider.Confirm.Unsaved.Title}</div>
-        <div className={styles.confirmDangerText}>
-          {Locale.CustomProvider.Confirm.Unsaved.Danger}
+    if (props.provider) {
+      // 编辑模式：直接关闭
+      props.onClose();
+    } else {
+      // 新建模式：询问是否保存
+      const confirmContent = (
+        <div className={styles.confirmDialogContent}>
+          <div>{Locale.CustomProvider.Confirm.Unsaved.Title}</div>
+          <div className={styles.confirmDangerText}>
+            {Locale.CustomProvider.Confirm.Unsaved.Danger}
+          </div>
         </div>
-      </div>
-    );
+      );
 
-    // 如果用户选择保存，则调用 handleSubmit 函数
-    // 如果用户选择不保存，则直接关闭模态框
-    const shouldSave = await showConfirm(confirmContent);
-    if (shouldSave) {
-      handleSubmit();
+      const shouldSave = await showConfirm(confirmContent);
+      if (shouldSave) {
+        handleSubmit();
+      }
+      props.onClose();
     }
-    props.onClose();
   };
 
   const nextStep = () => {
@@ -2791,6 +2900,73 @@ export function ProviderModal(props: ProviderModalProps) {
               </button>
               <button className={styles.saveButton} onClick={saveDisplayName}>
                 {Locale.CustomProvider.EditModel.Save}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {parsedPreview && (
+        <div className={`modal-mask ${styles.editModelMask}`}>
+          <div className={styles.parsingPreviewModal}>
+            <div className={styles.editNameHeader}>
+              <h3>{Locale.CustomProvider.ParsingPreview}</h3>
+              <span
+                className={styles.closeButton}
+                onClick={() => setParsedPreview(null)}
+              >
+                <CloseIcon />
+              </span>
+            </div>
+            <div className={styles.parsingPreviewBody}>
+              <div className={styles.parsingPreviewRow}>
+                <span className={styles.parsingPreviewLabel}>
+                  {Locale.CustomProvider.ParsedName}
+                </span>
+                <span className={styles.parsingPreviewValue}>
+                  {parsedPreview.name || "-"}
+                </span>
+              </div>
+              <div className={styles.parsingPreviewRow}>
+                <span className={styles.parsingPreviewLabel}>
+                  {Locale.CustomProvider.ParsedUrl}
+                </span>
+                <span className={styles.parsingPreviewValue}>
+                  {parsedPreview.baseUrl || "-"}
+                </span>
+              </div>
+              <div className={styles.parsingPreviewRow}>
+                <span className={styles.parsingPreviewLabel}>
+                  {Locale.CustomProvider.ParsedKey}
+                  {parsedPreview.apiKeys.length > 1 &&
+                    ` (${parsedPreview.apiKeys.length})`}
+                </span>
+                <span className={styles.parsingPreviewValue}>
+                  {parsedPreview.apiKeys.length > 0
+                    ? parsedPreview.apiKeys.map((k) => maskApiKey(k)).join(", ")
+                    : "-"}
+                </span>
+              </div>
+              <div className={styles.parsingPreviewRow}>
+                <span className={styles.parsingPreviewLabel}>
+                  {Locale.CustomProvider.ParsedType}
+                </span>
+                <span className={styles.parsingPreviewValue}>
+                  {providerTypeLabels[parsedPreview.type] || parsedPreview.type}
+                </span>
+              </div>
+            </div>
+            <div className={styles.editNameFooter}>
+              <button
+                className={styles.cancelButton}
+                onClick={() => setParsedPreview(null)}
+              >
+                {Locale.CustomProvider.CancelParsing}
+              </button>
+              <button
+                className={styles.saveButton}
+                onClick={applyParsedPreview}
+              >
+                {Locale.CustomProvider.ApplyParsedData}
               </button>
             </div>
           </div>
